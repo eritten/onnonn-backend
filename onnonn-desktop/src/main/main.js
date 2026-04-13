@@ -288,6 +288,17 @@ function registerIpc() {
     preferredDisplaySourceId = sourceId || null;
     return true;
   });
+  ipcMain.handle("screen-share:listSources", async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ["window", "screen"],
+      thumbnailSize: { width: 320, height: 180 }
+    });
+    return sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      thumbnail: source.thumbnail.toDataURL()
+    }));
+  });
 }
 
 function configureApiRequestHeaders() {

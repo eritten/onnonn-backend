@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, desktopCapturer } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   getSession: () => ipcRenderer.invoke("session:get"),
@@ -11,17 +11,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   showNativeNotification: (payload) => ipcRenderer.invoke("notify:show", payload),
   getPendingProtocolUrls: () => ipcRenderer.invoke("protocol:getPending"),
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke("screen-share:setSource", sourceId),
-  listDesktopSources: async () => {
-    const sources = await desktopCapturer.getSources({
-      types: ["window", "screen"],
-      thumbnailSize: { width: 320, height: 180 }
-    });
-    return sources.map((source) => ({
-      id: source.id,
-      name: source.name,
-      thumbnail: source.thumbnail.toDataURL()
-    }));
-  },
+  listDesktopSources: () => ipcRenderer.invoke("screen-share:listSources"),
   onProtocolUrl: (callback) => ipcRenderer.on("protocol:url", (_event, url) => callback(url)),
   onStartInstantMeeting: (callback) => ipcRenderer.on("app:start-instant-meeting", callback),
   onMeetingJoin: (callback) => ipcRenderer.on("meeting:join", (_event, payload) => callback(payload))
