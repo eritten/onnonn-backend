@@ -7,3 +7,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+onnonn-desktop/node_modules/
+onnonn-desktop/dist/
+onnonn-desktop/.vite/

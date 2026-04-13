@@ -1,0 +1,7 @@
+{
+  "API_BASE_URL": "https://onnonn.niveel.com/api/v1",
+  "LIVEKIT_URL": "wss://live.niveel.com",
+  "APP_PROTOCOL": "onnonn",
+  "STORE_NAME": "onnonn-desktop",
+  "TOKEN_REFRESH_LEEWAY_MS": 120000
+}

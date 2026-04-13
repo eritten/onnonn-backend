@@ -9,10 +9,31 @@ const {
   MeetingNote,
   Subscription
 } = require("../models");
+const mongoose = require("mongoose");
 const { chatJson, createEmbedding } = require("./openaiService");
 const { openai } = require("../config/openai");
 const { getRedis } = require("../config/redis");
 const { NotFoundError, PlanLimitError, AIServiceError } = require("../utils/errors");
+
+async function resolveMeetingId(meetingIdentifier) {
+  if (!meetingIdentifier) {
+    throw new NotFoundError("Meeting not found");
+  }
+
+  if (mongoose.isValidObjectId(meetingIdentifier)) {
+    const byId = await Meeting.findById(meetingIdentifier).select("_id");
+    if (byId) {
+      return byId._id;
+    }
+  }
+
+  const byPublicId = await Meeting.findOne({ meetingId: meetingIdentifier }).select("_id");
+  if (!byPublicId) {
+    throw new NotFoundError("Meeting not found");
+  }
+
+  return byPublicId._id;
+}
 
 async function generateTranscription(recording) {
   if (!recording?.fileUrl) {
@@ -57,7 +78,8 @@ async function generateTranscription(recording) {
 }
 
 async function generateSummary(meetingId) {
-  const transcription = await AITranscription.findOne({ meeting: meetingId });
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const transcription = await AITranscription.findOne({ meeting: resolvedMeetingId });
   if (!transcription) {
     throw new NotFoundError("Transcription not found");
   }
@@ -67,7 +89,7 @@ async function generateSummary(meetingId) {
     jsonSchemaHint: "{overview:string,keyPoints:string[],decisions:string[],actionItems:{assigneeName:string,task:string,deadline:string}[],nextSteps:string[],smartNotes:string[]}"
   });
   const record = await AISummary.findOneAndUpdate(
-    { meeting: meetingId },
+    { meeting: resolvedMeetingId },
     {
       overview: summary.overview || "Summary unavailable",
       keyPoints: summary.keyPoints || [],
@@ -79,10 +101,10 @@ async function generateSummary(meetingId) {
     },
     { upsert: true, new: true }
   );
-  await AIActionItem.deleteMany({ meeting: meetingId });
+  await AIActionItem.deleteMany({ meeting: resolvedMeetingId });
   if (record.actionItems.length) {
     const actionItems = await AIActionItem.insertMany(record.actionItems.map((item) => ({
-      meeting: meetingId,
+      meeting: resolvedMeetingId,
       assigneeName: item.assigneeName,
       task: item.task,
       deadline: item.deadline ? new Date(item.deadline) : undefined
@@ -104,28 +126,30 @@ async function generateSummary(meetingId) {
       }
     }
   }
-  await generateEmbedding(meetingId, record);
+  await generateEmbedding(resolvedMeetingId, record);
   return record;
 }
 
 async function generateSentiment(meetingId) {
-  const transcription = await AITranscription.findOne({ meeting: meetingId });
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const transcription = await AITranscription.findOne({ meeting: resolvedMeetingId });
   const result = await chatJson({
     system: "Analyze meeting transcript sentiment and return structured JSON.",
     user: transcription?.fullText || "",
     jsonSchemaHint: "{overallSentiment:string,overallScore:number,segments:[],timeline:[]}"
   });
-  return AISentiment.findOneAndUpdate({ meeting: meetingId }, result, { upsert: true, new: true });
+  return AISentiment.findOneAndUpdate({ meeting: resolvedMeetingId }, result, { upsert: true, new: true });
 }
 
 async function generateCoachingReport(meetingId) {
-  const transcription = await AITranscription.findOne({ meeting: meetingId });
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const transcription = await AITranscription.findOne({ meeting: resolvedMeetingId });
   const result = await chatJson({
     system: "Generate a meeting coach report in JSON.",
     user: transcription?.fullText || "",
     jsonSchemaHint: "{speakingTimeBalance:object,interruptionCount:number,offTopicMoments:[],concisenessFeedback:string,positiveMoments:string[],overallScore:number,summary:string}"
   });
-  return AIMeetingCoach.findOneAndUpdate({ meeting: meetingId }, result, { upsert: true, new: true });
+  return AIMeetingCoach.findOneAndUpdate({ meeting: resolvedMeetingId }, result, { upsert: true, new: true });
 }
 
 async function generateEmbedding(meetingId, summaryRecord) {
@@ -135,7 +159,8 @@ async function generateEmbedding(meetingId, summaryRecord) {
 }
 
 async function translateTranscription(meetingId, userId, targetLanguage) {
-  const transcription = await AITranscription.findOne({ meeting: meetingId });
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const transcription = await AITranscription.findOne({ meeting: resolvedMeetingId });
   if (!transcription) {
     throw new NotFoundError("Transcription not found");
   }
@@ -156,9 +181,10 @@ async function translateTranscription(meetingId, userId, targetLanguage) {
 }
 
 async function aiAssistant(meetingId, question) {
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
   const [transcriptBuffer, notes] = await Promise.all([
-    getRedis().lrange(`meeting-transcript-buffer:${meetingId}`, 0, -1),
-    MeetingNote.find({ meeting: meetingId })
+    getRedis().lrange(`meeting-transcript-buffer:${resolvedMeetingId}`, 0, -1),
+    MeetingNote.find({ meeting: resolvedMeetingId })
   ]);
   return chatJson({
     system: "Answer questions about an in-progress meeting from transcript, notes, and shared context.",
@@ -168,17 +194,19 @@ async function aiAssistant(meetingId, question) {
 }
 
 async function generateAgenda(meetingId, payload) {
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
   const result = await chatJson({
     system: "Create a structured meeting agenda with timed sections in JSON.",
     user: JSON.stringify(payload),
     jsonSchemaHint: "{sections:[{title:string,durationMinutes:number,discussionPoints:string[]}]}"
   });
-  await Meeting.findByIdAndUpdate(meetingId, { agenda: result });
+  await Meeting.findByIdAndUpdate(resolvedMeetingId, { agenda: result });
   return result;
 }
 
 async function getAgenda(meetingId) {
-  const meeting = await Meeting.findById(meetingId);
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const meeting = await Meeting.findById(resolvedMeetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -186,7 +214,8 @@ async function getAgenda(meetingId) {
 }
 
 async function updateAgenda(meetingId, agenda) {
-  const meeting = await Meeting.findByIdAndUpdate(meetingId, { agenda }, { new: true });
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const meeting = await Meeting.findByIdAndUpdate(resolvedMeetingId, { agenda }, { new: true });
   return meeting.agenda;
 }
 
@@ -199,7 +228,8 @@ async function suggestMeetingTitle(payload) {
 }
 
 async function generateFollowUpEmail(meetingId) {
-  const [summary, meeting] = await Promise.all([AISummary.findOne({ meeting: meetingId }), Meeting.findById(meetingId)]);
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
+  const [summary, meeting] = await Promise.all([AISummary.findOne({ meeting: resolvedMeetingId }), Meeting.findById(resolvedMeetingId)]);
   const result = await chatJson({
     system: "Generate a professional follow-up email for a meeting.",
     user: JSON.stringify({ summary, meeting }),
@@ -236,6 +266,7 @@ function cosineSimilarity(a, b) {
 }
 
 async function storeRealtimeCaption(meetingId, caption) {
+  const resolvedMeetingId = await resolveMeetingId(meetingId);
   let text = caption.text;
   if (!text && caption.audioBase64 && openai) {
     const bytes = Buffer.from(caption.audioBase64, "base64");
@@ -244,11 +275,12 @@ async function storeRealtimeCaption(meetingId, caption) {
     text = transcription.text;
   }
   const payload = { ...caption, text, createdAt: Date.now() };
-  await getRedis().rpush(`meeting-transcript-buffer:${meetingId}`, JSON.stringify(payload));
+  await getRedis().rpush(`meeting-transcript-buffer:${resolvedMeetingId}`, JSON.stringify(payload));
   return payload;
 }
 
 module.exports = {
+  resolveMeetingId,
   generateTranscription,
   generateSummary,
   generateSentiment,

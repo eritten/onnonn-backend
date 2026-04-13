@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark light;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-brand-950 text-brand-text;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translateY(48px) scale(0.85);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-160px) scale(1.08);
+  }
+}
+
+.panel {
+  @apply rounded-2xl border border-brand-800 bg-brand-900/90 shadow-panel backdrop-blur;
+}
+
+.field {
+  @apply w-full rounded-xl border border-brand-800 bg-brand-950 px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30;
+}
+
+.field-label {
+  @apply text-sm font-medium text-brand-text;
+}
+
+.form-error {
+  @apply text-sm font-medium text-red-400;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center rounded-xl bg-brand-accent px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-950 disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-xl border border-brand-800 bg-brand-900 px-4 py-3 text-sm font-semibold text-brand-text transition hover:border-brand-accent/50 hover:bg-brand-800/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-950 disabled:cursor-not-allowed disabled:opacity-60;
+}

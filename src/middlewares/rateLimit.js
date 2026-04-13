@@ -1,24 +1,44 @@
 const rateLimit = require("express-rate-limit");
 
-const authRateLimit = rateLimit({
+function createLimiter(options) {
+  return rateLimit({
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...options
+  });
+}
+
+const authRateLimit = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false
+  max: 10,
+  skipSuccessfulRequests: true
 });
 
-const apiRateLimit = rateLimit({
+const refreshRateLimit = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false
+  max: 240
 });
 
-const aiRateLimit = rateLimit({
+const recoveryRateLimit = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false
+  max: 8,
+  skipSuccessfulRequests: true
 });
 
-module.exports = { authRateLimit, apiRateLimit, aiRateLimit };
+const apiRateLimit = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 600
+});
+
+const aiRateLimit = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 120
+});
+
+module.exports = {
+  authRateLimit,
+  refreshRateLimit,
+  recoveryRateLimit,
+  apiRateLimit,
+  aiRateLimit
+};
