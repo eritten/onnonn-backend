@@ -159,6 +159,18 @@ async function createSession(user, { userAgent, ipAddress }) {
   const accessToken = signAccessToken({ sub: user._id.toString(), role: user.role });
   const rawRefreshToken = signRefreshToken({ sub: user._id.toString() });
   const refreshTokenHash = hashToken(rawRefreshToken);
+  const redis = getRedis();
+
+  if (userAgent) {
+    const existingSessions = await Session.find({ user: user._id, userAgent }).select("_id");
+    if (existingSessions.length) {
+      await Session.deleteMany({ _id: { $in: existingSessions.map((session) => session._id) } });
+      for (const existingSession of existingSessions) {
+        await redis.srem(`sessions:${user._id}`, existingSession._id.toString());
+      }
+    }
+  }
+
   const session = await Session.create({
     user: user._id,
     refreshTokenHash,
@@ -166,7 +178,6 @@ async function createSession(user, { userAgent, ipAddress }) {
     ipAddress,
     expiresAt: dayjs().add(7, "day").toDate()
   });
-  const redis = getRedis();
   await redis.sadd(`sessions:${user._id}`, session._id.toString());
   return { accessToken, refreshToken: rawRefreshToken, session };
 }
