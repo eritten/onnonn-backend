@@ -1,0 +1,823 @@
+================================================================================
+CODEX PROMPT: ONNONN — AI-POWERED MEETING PLATFORM BACKEND
+Platform Name: Onnonn
+Stack: Node.js + Express + MongoDB + Mongoose + Redis + LiveKit + Stripe + OpenAI
+================================================================================
+
+
+PROJECT OVERVIEW
+----------------
+Build a complete, production-ready backend for Onnonn — an AI-powered video
+meeting platform that competes with and surpasses Zoom. Onnonn is built with
+Node.js and Express, uses MongoDB as the primary database via Mongoose ODM,
+Redis for caching and job queuing, LiveKit for all real-time video and audio
+infrastructure, Stripe for billing and subscriptions, and OpenAI for all AI
+features. Every feature described in this prompt must be fully implemented.
+Nothing should be left as a stub, placeholder, or TODO. The codebase must be
+complete, tested, documented, and deployment-ready.
+
+
+PROJECT STRUCTURE
+-----------------
+Use a clean feature-based folder structure. Organize code into the following
+top-level folders: src/routes, src/controllers, src/services, src/middlewares,
+src/models, src/validators, src/utils, src/jobs, src/config, src/ai, and
+src/webhooks. The entry point is src/server.js. Use dotenv for environment
+variables. Keep all business logic in services. Controllers only handle HTTP
+request and response. Never put database queries directly in controllers.
+
+
+DATABASE
+--------
+Use MongoDB with Mongoose as the ODM. Define complete, well-structured
+Mongoose schemas and models that cover every feature in this prompt. Use
+proper references between documents using ObjectId refs where appropriate and
+embed sub-documents where embedding is the better MongoDB pattern. Add
+indexes on all frequently queried fields. Use Mongoose schema validation,
+custom validators, virtual fields, and pre/post hooks where appropriate.
+
+Provide a seed script that populates the database with realistic test data
+including users, organizations, meetings, recordings, plans, and
+subscriptions.
+
+Define the following Mongoose models at minimum: User, Organization,
+OrganizationMember, Department, Meeting, MeetingParticipant, BreakoutRoom,
+Poll, PollResponse, QnAQuestion, ChatMessage, Whiteboard, MeetingNote,
+Recording, RecordingShare, Webinar, WebinarRegistrant, WebinarAttendant,
+Plan, Subscription, Invoice, Contact, ContactRequest, Availability,
+AvailabilityBooking, Notification, NotificationPreference, DeviceToken,
+AuditLog, AITranscription, AISummary, AIActionItem, AIMeetingCoach,
+AISentiment, AIEmbedding, VirtualBackground, CalendarConnection,
+MeetingTemplate, Session, PasswordResetToken, EmailVerificationToken,
+TwoFactorSecret, SSOConfiguration, GDPRRequest.
+
+
+================================================================================
+AUTHENTICATION AND USER MANAGEMENT
+================================================================================
+
+Implement a full authentication system:
+
+User registration with email and password. Hash all passwords with bcrypt.
+On registration, create a Stripe customer for the user and save the Stripe
+customer ID on the User document. Assign the free plan by default.
+
+Email verification. Send a verification email immediately after registration
+with a unique token. Store the token in the EmailVerificationToken collection
+with an expiry. The account is inactive until verified. Resend verification
+email endpoint.
+
+Login with email and password. Return a signed JWT access token with a short
+expiry and a refresh token with a long expiry. Store refresh tokens hashed
+in the Session collection and cache active session IDs in Redis.
+
+Refresh token endpoint. Exchange a valid refresh token for a new access token.
+
+Logout endpoint. Delete the session from MongoDB and remove from Redis.
+Support logout from all devices simultaneously.
+
+Forgot password. User submits email and receives a reset link with a
+short-lived token stored in PasswordResetToken collection. User submits a
+new password with the token. Invalidate token after use.
+
+Change password for authenticated users. Require current password
+confirmation.
+
+Google OAuth2 login. Allow sign in with Google. If the email matches an
+existing user, link and authenticate. Otherwise create a new user. Store
+Google OAuth2 tokens on the User document encrypted.
+
+User profile management. Users can update display name, profile photo
+uploaded to Cloudinary with the resulting URL stored on the User document,
+job title, company name, phone number, timezone, language preference, and bio.
+
+Two-factor authentication using TOTP. Store the TOTP secret in the
+TwoFactorSecret collection. Endpoint to generate QR code and secret. Endpoint
+to verify and activate 2FA. Endpoint to disable 2FA requiring password
+confirmation. Require TOTP code at login when enabled.
+
+Roles: regular user, organization admin, and platform superadmin. Enforce
+role-based access control via middleware on every protected route.
+
+Account suspension. Admins and superadmins can suspend or unsuspend accounts.
+Suspended users cannot log in. Store suspension status and reason on User.
+
+Session management. List all active sessions from the Session collection for
+the authenticated user. Allow revoking individual sessions or all sessions
+except the current one.
+
+
+================================================================================
+PLANS AND BILLING
+================================================================================
+
+Implement a complete subscription and billing system using Stripe.
+
+Store plan definitions in the Plan collection with fields for name, price,
+Stripe price ID, and a limits object containing: max meeting duration in
+minutes, max participants per meeting, cloud recording storage in GB, and
+flags for each feature.
+
+Free plan limits: meetings up to 40 minutes, maximum 100 participants, no
+cloud recording, no AI features.
+
+Pro plan limits: unlimited meeting duration, up to 300 participants, 5GB
+cloud recording storage, AI transcription, summary, smart notes, and action
+items.
+
+Business plan limits: unlimited meeting duration, up to 1000 participants,
+unlimited cloud recording storage, all AI features, SSO, IP allowlisting,
+and advanced analytics.
+
+Store the user's current subscription in the Subscription collection with
+fields for user reference, plan reference, Stripe subscription ID, Stripe
+customer ID, status, current period start, current period end, cancel at
+period end flag, and storage used in bytes.
+
+Billing endpoints and logic:
+
+Create a Stripe customer at user registration and store the ID on the User.
+
+List plans endpoint returning all Plan documents with pricing and feature
+details.
+
+Subscribe to a plan. Create a Stripe Checkout Session. Return the checkout
+URL.
+
+Stripe webhook handler at /webhooks/stripe. Verify webhook signature. Handle:
+checkout.session.completed, customer.subscription.created,
+customer.subscription.updated, customer.subscription.deleted, invoice.paid,
+invoice.payment_failed, invoice.payment_action_required. On each event,
+find the user by Stripe customer ID and update the Subscription document.
+Store invoice records in the Invoice collection on invoice.paid.
+
+Get current subscription status endpoint.
+
+Cancel subscription at end of billing period.
+
+Upgrade or downgrade plan using Stripe proration.
+
+Billing history. List Invoice documents for the user with amounts, dates,
+and Stripe-hosted invoice PDF URLs.
+
+Update payment method via Stripe SetupIntent.
+
+Enforce plan limits everywhere. Check participant limits at meeting creation.
+Check storage quota before recording. Check AI feature access before AI
+endpoints. Return structured errors with plan limit details.
+
+Usage tracking. Track meeting minutes on the Subscription document. Update
+in real time via LiveKit webhooks. Warn users approaching the 40-minute free
+plan limit via a LiveKit data message.
+
+
+================================================================================
+MEETINGS
+================================================================================
+
+Implement a comprehensive meeting management system.
+
+Meeting model fields: host (User ref), title, description, scheduledStartTime,
+expectedDuration, maxParticipants, password (hashed if set), waitingRoomEnabled,
+joinBeforeHost, muteOnEntry, allowSelfUnmute, autoRecord, meetingType (enum:
+one-on-one, group, webinar), e2eEncryptionEnabled, meetingId (unique short
+alphanumeric), joinUrl, liveKitRoomName, status (enum: scheduled, ongoing,
+ended, cancelled), recurrence settings object, personal room flag, template
+reference, lockedAt, createdAt, endedAt, actualDuration.
+
+Create a meeting. Generate a unique meeting ID. Construct a join URL. Create
+a LiveKit room. If auto-record is enabled and the plan allows it, note this
+for when the meeting starts.
+
+Generate participant tokens. Verify identity if authenticated. Check password.
+Check waiting room. Check plan participant limits. Generate LiveKit token with
+role-appropriate grants.
+
+Waiting room. Track waiting participants per room in Redis as a sorted set.
+Notify host via LiveKit data message. Endpoints to list waiting participants,
+admit one, reject one, admit all.
+
+List meetings for authenticated user with status filter and pagination.
+
+Get meeting by meeting ID.
+
+Update meeting. Notify invited participants of changes by email.
+
+Cancel meeting. Notify participants. Terminate LiveKit room if ongoing.
+
+End meeting. Call LiveKit API to end room. Stop recordings. Mark as ended.
+Update actualDuration. Trigger post-meeting analytics job.
+
+Recurring meetings. Store recurrence rule (frequency, interval, days of week,
+end date, occurrence count) on the Meeting document. Generate occurrence
+documents. Edit single occurrence or all future occurrences.
+
+Personal meeting room. Each User has a personalRoomId field. Separate settings
+for personal room stored on the User document.
+
+Meeting templates. MeetingTemplate model stores settings. Endpoint to save,
+list, apply, update, and delete templates.
+
+Guest join. Accept display name and optional password. Generate restricted
+LiveKit token. Log guest in MeetingParticipant with guestName field.
+
+List current participants via LiveKit API.
+
+Remove participant via LiveKit API.
+
+Mute or unmute participant via LiveKit API.
+
+Transfer host. Update Meeting document host field and re-issue tokens.
+
+Co-hosts. Store co-host user IDs array on Meeting. Endpoints to add and
+remove co-hosts.
+
+Lock and unlock meeting. Set lockedAt on Meeting. Block new joins when locked.
+
+Move participant to waiting room mid-meeting via LiveKit API and Redis update.
+
+Raise hand. Track raised hands per room in Redis as an ordered list. Endpoints
+to raise, lower, and list.
+
+Emoji reactions. Store each reaction as an embedded document in Meeting.reactions
+array with participant ID, emoji, and timestamp.
+
+Breakout rooms. BreakoutRoom model: meeting ref, name, liveKitRoomName,
+participantIds array, status. Create rooms, assign participants, generate
+breakout tokens, broadcast message to all breakout rooms via LiveKit data
+messages, close all and return participants to main room.
+
+Polls. Poll model: meeting ref, question, options array, status, createdBy.
+PollResponse model: poll ref, participant ref or guest name, selectedOption.
+Endpoints to create, respond, get real-time results, end poll.
+
+Q and A. QnAQuestion model: meeting ref, asker ref or guest name, question,
+upvotes array, answeredAt, dismissedAt, answerText, isPublic. Endpoints to
+submit, upvote, answer, dismiss, list.
+
+In-meeting chat. ChatMessage model: meeting ref, sender ref or guest name,
+content, messageType (public or private), recipient ref if private,
+isPinned, deletedAt. Endpoints to send, list public, list private, delete
+(host only), pin.
+
+Whiteboard. Whiteboard model: meeting ref, canvasState JSON field, lastUpdatedBy,
+updatedAt. Endpoints to get and update canvas state. Broadcast updates via
+LiveKit data channel.
+
+Screen sharing control. Track active screen sharer per room in Redis.
+Host endpoint to stop screen share via LiveKit API.
+
+Virtual backgrounds. VirtualBackground model: user ref (null for platform
+defaults), imageUrl, isDefault. Endpoints to list, upload to Cloudinary,
+delete. Enforce per-user limit of ten custom backgrounds.
+
+Spotlight. Track spotlighted participant IDs per room in Redis. Host endpoints
+to add, remove, and clear spotlight. Broadcast changes via LiveKit data.
+
+Meeting notes. MeetingNote model: meeting ref, content, createdBy, updatedAt.
+Endpoints to add, edit, get, delete for host and co-hosts.
+
+
+================================================================================
+RECORDING
+================================================================================
+
+Recording model: meeting ref, host ref, liveKitEgressId, status (enum:
+pending, recording, processing, ready, failed, deleted), startTime, endTime,
+duration, fileSizeBytes, fileUrl, storageProvider, transcriptionStatus,
+summaryStatus, consentResponses array of participant ref and consented boolean,
+shareLinks array of share token, password hash, expiresAt.
+
+Start recording. Trigger LiveKit RoomCompositeEgress. Create Recording
+document. Enforce storage quota. Send consent notification via LiveKit data
+message if required.
+
+Stop recording. Stop egress via LiveKit API. Update Recording status.
+
+LiveKit egress webhook. On egress ended, upload file to Cloudinary or
+S3-compatible bucket. Update Recording with fileUrl, duration, fileSizeBytes,
+status ready. Trigger AI transcription and summary jobs. Update storage used
+on Subscription.
+
+List recordings with filters and pagination.
+
+Get recording details.
+
+Delete recording. Remove from storage. Set status to deleted. Update storage
+used on Subscription.
+
+Share recording. Generate a unique share token. Store in Recording shareLinks
+array with optional password hash and expiry. Public endpoint to view shared
+recording with token and optional password.
+
+Download recording. Generate signed time-limited URL.
+
+Storage quota enforcement. Reject start recording if quota exceeded.
+
+Recording consent tracking. Store each participant's consent response on the
+Recording document.
+
+Auto-delete. Cleanup job deletes recordings older than seven days for free
+plan users. Remove from storage and update Subscription storage count.
+
+
+================================================================================
+WEBINARS
+================================================================================
+
+Webinar model: host ref, title, description, scheduledTime, practiceSessionTime,
+registrationRequired, maxAttendees, status, liveKitRoomName, panelists array
+of user refs, recording ref.
+
+Create webinar. Invite panelists by email.
+
+Registration. WebinarRegistrant model: webinar ref, name, email, customFields,
+joinToken (unique), joinedAt, leftAt. Send confirmation email with unique join
+link. List registrants with CSV export.
+
+Panelist tokens. Generate LiveKit token with publish permissions.
+
+Attendee join. Verify join token from registration. Generate subscribe-only
+LiveKit token. Create WebinarAttendant document tracking join and leave times.
+
+Practice session. Only host and panelists can join before scheduled start.
+Attendees receive a holding response.
+
+Promote attendee to panelist. Revoke old token permissions, issue panelist
+token, add to panelists array.
+
+Q and A. Same model as meeting Q and A but visible only to host and panelists
+by default. Hosts can make answers public.
+
+Polls. Same as meeting polls.
+
+Post-webinar analytics. Compute and store: total registrants, total attendees,
+peak concurrent, average watch duration, poll participation, Q and A stats.
+Attach to Webinar document.
+
+Auto-share recording. If host enabled it, share recording link with all
+registrants after the webinar ends via email.
+
+
+================================================================================
+AI FEATURES — POWERED BY OPENAI
+================================================================================
+
+All AI features use the OpenAI API. Store the OpenAI API key in environment
+variables. Implement all AI logic in src/ai with clean service modules. Each
+AI feature must handle errors gracefully and never block the main meeting flow.
+All AI results are stored in their respective Mongoose models.
+
+AI MEETING TRANSCRIPTION
+After a recording is complete, submit the audio file to OpenAI Whisper API.
+Store the full transcription in the AITranscription model with fields for:
+meeting ref, recording ref, segments array (each with start time, end time,
+speaker label, text, confidence), fullText, language, status. Retrieve
+endpoint. Download as plain text or SRT subtitle file endpoint.
+
+AI MEETING SUMMARY
+After transcription is complete, use GPT-4o to generate a structured summary.
+Store in AISummary model with fields: meeting ref, overview, keyPoints array,
+decisions array, actionItems array (each with assignee name, task, deadline),
+nextSteps array, status. Retrieve endpoint. Regenerate endpoint.
+
+AI SMART NOTES
+Use GPT-4o to extract bullet-point smart notes from the transcription. Store
+in AISummary as a smartNotes array. Retrieve endpoint.
+
+AI ACTION ITEM TRACKER
+Extract action items from transcription using GPT-4o. Store each in the
+AIActionItem model with fields: meeting ref, assigneeName, assigneeUser ref
+(if matched to a platform user), task, deadline, completedAt, notes. Endpoints
+to list by meeting, mark complete, edit, delete. Send email reminder to
+assignees one day before deadline via the reminder job queue.
+
+AI MEETING COACH
+After the meeting ends, use GPT-4o to analyze the transcription and generate
+a coaching report. Store in AIMeetingCoach model with fields: meeting ref,
+speakingTimeBalance object (participant name to percentage), interruptionCount,
+offTopicMoments array with timestamps, conciseness feedback, positiveMoments
+array, overallScore (0 to 100), summary. Retrieve endpoint.
+
+AI SENTIMENT ANALYSIS
+After transcription, use GPT-4o to analyze sentiment per segment. Store in
+AISentiment model with fields: meeting ref, overallSentiment (positive,
+neutral, negative), overallScore, segments array (each with start time,
+end time, sentiment label, score), timeline array for charting. Retrieve
+endpoint.
+
+AI CHAT ASSISTANT
+In-meeting AI chat endpoint. Accept a question from a participant. Use GPT-4o
+with context built from: current meeting transcript buffer stored in Redis,
+meeting notes, and any shared documents. Return an AI-generated response.
+Also support: summarize so far, list action items so far, draft a response
+for the participant. Rate limit per user per meeting.
+
+AI AGENDA GENERATOR
+Endpoint accepting meeting topic, duration, participant count, and notes.
+Use GPT-4o to generate a structured agenda with timed sections and discussion
+points. Store the agenda as a field on the Meeting document. Retrieve and
+update endpoints.
+
+AI FOLLOW-UP EMAIL GENERATOR
+After meeting ends, use GPT-4o to generate a professional follow-up email
+based on summary, action items, and decisions. Store the draft on the Meeting
+document. Host can edit and send to all participants via the email queue.
+
+AI TITLE AND DESCRIPTION SUGGESTER
+Endpoint accepting keywords or a brief description. GPT-4o returns three
+suggested titles and a suggested description for a new meeting.
+
+AI CONTENT SAFETY
+Before storing any chat message, call OpenAI Moderation API. If flagged,
+reject the message, notify the sender, and log the attempt on the
+ChatMessage document with a flagged field. Notify the host. If a user is
+flagged more than three times in a meeting, mute their chat for the rest
+of the meeting.
+
+AI LANGUAGE TRANSLATION
+After transcription, endpoint to translate the full transcription to any
+target language using GPT-4o. Store translations on the AITranscription
+document as a translations object keyed by language code. Limit to five
+translations per meeting per plan.
+
+AI SPEAKER IDENTIFICATION
+During transcription processing, use GPT-4o to label speakers in the
+transcript using contextual clues. Match speaker labels to participant
+names. Store labeled segments on AITranscription. Update speaker labels
+endpoint for manual correction.
+
+AI MEETING SEARCH
+Semantic search endpoint. Accept a natural language query. Use OpenAI
+embeddings to generate a query vector. Store meeting embedding vectors in
+the AIEmbedding model with fields: meeting ref, embeddingVector array,
+sourceText (summary plus key points). Use MongoDB Atlas Vector Search or
+a cosine similarity computation to find the most relevant meetings. Return
+ranked results with matched excerpts. Generate and store embeddings after
+each meeting summary is created.
+
+AI REAL-TIME CAPTION ASSIST
+Endpoint accepting audio chunk as base64 from the frontend. Pass to OpenAI
+Whisper. Return caption text. Store caption segments with timestamps in Redis
+during the meeting for later transcription assembly.
+
+
+================================================================================
+CONTACTS AND TEAM FEATURES
+================================================================================
+
+Contact model: requester ref, recipient ref, status (pending, accepted,
+rejected, blocked). Endpoints to send request, accept, reject, block, list
+contacts, list pending requests, search users by name or email.
+
+Organizations. Organization model: name, logo (Cloudinary URL), industry,
+size, owner ref, billingSettings, securityPolicy (recording consent required,
+waiting room required, restrict to org members, allowed domains array),
+defaultMeetingSettings, SSOConfiguration ref.
+
+OrganizationMember model: organization ref, user ref, role (owner, admin,
+member), department ref, joinedAt.
+
+Invite members by email. Store pending invitations with expiry token. Accept
+via unique link. Endpoint to resend invitation.
+
+Remove member from organization.
+
+Department model: organization ref, name, description, memberIds array.
+CRUD endpoints for departments.
+
+Organization analytics. Aggregated MongoDB aggregation pipeline queries for
+all meetings within the organization available to org admins.
+
+SSO. SSOConfiguration model: organization ref, idpEntityId, idpSsoUrl,
+idpCertificate, spEntityId, attributeMapping object, isActive. SAML assertion
+consumer endpoint at /auth/saml/callback. Business plan feature.
+
+
+================================================================================
+SCHEDULING AND CALENDAR
+================================================================================
+
+On meeting creation or update, send calendar invite emails with ICS file
+attachment generated programmatically.
+
+Get upcoming meetings in calendar format.
+
+Google Calendar integration. CalendarConnection model: user ref, accessToken
+(encrypted), refreshToken (encrypted), expiresAt, calendarId. Endpoints to
+connect, disconnect, and check status. On meeting create, add Google Calendar
+event. On update, update event. On cancel, delete event. Handle token refresh.
+
+Availability scheduling. Availability model: user ref, bookingHandle (unique
+slug), slots array of day of week and time ranges, bufferMinutes, meetingDuration,
+isActive. AvailabilityBooking model: availability ref, bookerName, bookerEmail,
+bookerUserId ref, scheduledTime, meetingId ref, status. Endpoints to set
+availability, get public booking page by handle, list available slots for
+the next 30 days, book a slot. Booking creates a Meeting and sends
+confirmation emails.
+
+Meeting reminders. Schedule Bull jobs at meeting creation for one week before,
+one day before, one hour before, and fifteen minutes before. Cancel jobs
+on meeting update or cancel.
+
+
+================================================================================
+NOTIFICATIONS
+================================================================================
+
+Notification model: user ref, type, title, message, metadata object, isRead,
+createdAt. Endpoints to list with pagination, mark one read, mark all read,
+delete.
+
+Push notifications via Firebase Cloud Messaging. DeviceToken model: user ref,
+token, platform (ios, android, web), createdAt. Endpoints to register and
+unregister tokens. Send push via Firebase Admin SDK in the push notification
+job queue.
+
+Email notifications via nodemailer with HTML templates stored in src/templates.
+Templates for every key event. All emails are branded with Onnonn styling.
+All sending is done through the email job queue.
+
+NotificationPreference model: user ref, preferences object keyed by
+notification type each with email, inApp, and push booleans. Endpoints to
+get and update preferences. Always check preferences before sending.
+
+
+================================================================================
+SECURITY AND COMPLIANCE
+================================================================================
+
+JWT authentication middleware on all protected routes.
+
+Rate limiting using express-rate-limit with ioredis store. Auth routes get
+stricter limits. AI endpoints get per-user limits.
+
+Helmet.js for security headers.
+
+CORS configured from environment variable frontend URL.
+
+Zod for input validation on all request bodies, query params, and route params.
+
+End-to-end encryption. When enabled, configure LiveKit room with E2E settings
+and distribute keys to participants via signaling.
+
+IP allowlisting. Organization security policy stores allowed CIDR ranges.
+Check user's request IP against org policy in authentication middleware for
+org members.
+
+Audit logging. AuditLog model: userId ref, action type, resourceType,
+resourceId, ipAddress, userAgent, timestamp, metadata object. Write to
+AuditLog on every significant action. Admin endpoint to query with filters
+and pagination.
+
+GDPR. GDPRRequest model: user ref, type (export or deletion), status,
+requestedAt, completedAt, downloadUrl. Data export job: aggregate all user
+data from all collections and write to a JSON file, upload to Cloudinary,
+store URL on GDPRRequest, send download link email. Deletion job: remove
+personal data from all collections, anonymize shared records, delete files
+from storage, cancel Stripe subscription, send confirmation email.
+
+
+================================================================================
+ANALYTICS AND REPORTING
+================================================================================
+
+Per-meeting analytics stored on Meeting document in an analytics subdocument:
+totalDuration, scheduledVsActualDiff, participantCount, peakConcurrent,
+perParticipantEngagement array, recordingDuration, pollParticipationRate,
+qnaCount, avgNetworkQuality, chatMessageCount, reactionCount, engagementScore.
+Compute and store via post-meeting analytics job.
+
+User analytics endpoint. MongoDB aggregation across Meeting and Recording
+collections for total meetings hosted, attended, minutes, storage, AI usage.
+
+Organization analytics endpoint. Aggregation across all org member meetings.
+
+Superadmin analytics endpoint. Platform-wide aggregations: total users,
+new users this week and month, subscriptions by plan, meetings today and
+this month, total storage used, OpenAI API usage costs tracked in a
+PlatformMetrics collection updated via jobs.
+
+CSV export endpoints. Stream MongoDB cursor to CSV using a streaming approach.
+For large datasets, generate asynchronously and deliver via email link.
+
+
+================================================================================
+LIVEKIT INTEGRATION
+================================================================================
+
+Use the LiveKit Node.js server SDK. All config from environment variables.
+
+Room creation with options derived from meeting settings.
+
+Token generation with role-based grants as described in the meetings section.
+
+LiveKit webhook handler at /webhooks/livekit. Verify webhook signature.
+Handle: room_started, room_finished, participant_joined, participant_left,
+track_published, track_unpublished, egress_started, egress_updated,
+egress_ended. Update MongoDB documents and trigger jobs on each event.
+
+Room service API proxies for participant management, muting, removing, and
+sending data messages.
+
+Egress API for recording start and stop.
+
+Data messaging for server-driven events to all meeting participants.
+
+
+================================================================================
+BACKGROUND JOBS
+================================================================================
+
+Use Bull with Redis. All queues must have retry logic, exponential backoff,
+and dead letter queue. Provide a Bull Board UI mounted at /admin/queues
+protected by superadmin authentication.
+
+Queues to implement:
+
+Email queue: all outgoing emails.
+Push notification queue: FCM push sends.
+Recording processing queue: upload to storage after egress, update Recording.
+AI transcription queue: submit to Whisper, store result, trigger downstream.
+AI summary queue: generate summary, smart notes, action items.
+AI analysis queue: sentiment, coaching report, embedding generation.
+Reminder queue: meeting reminders scheduled at creation.
+Cleanup queue: daily job for auto-delete recordings, expired tokens, stale
+invitations, old audit logs.
+Subscription queue: Stripe webhook event processing.
+GDPR queue: data export and deletion.
+Calendar sync queue: Google Calendar event sync.
+Availability booking queue: booking confirmation processing.
+Analytics queue: post-meeting analytics computation.
+Follow-up email queue: generate and optionally send AI follow-up emails.
+
+
+================================================================================
+API DOCUMENTATION
+================================================================================
+
+Use swagger-jsdoc and swagger-ui-express. Every route must have complete
+Swagger annotations covering method, path, summary, description, request body
+schema, query parameters, path parameters, all response schemas, authentication
+requirement, and tags. Swagger UI at /api/docs. OpenAPI JSON at /api/docs.json.
+
+
+================================================================================
+ERROR HANDLING
+================================================================================
+
+Global error handling middleware. All errors return JSON with: statusCode,
+errorCode string, message, and optional details for validation errors. Custom
+error classes: AuthenticationError, AuthorizationError, ValidationError,
+NotFoundError, PlanLimitError, PaymentError, LiveKitError, AIServiceError,
+ConflictError. No stack traces in production. Log all 5xx errors with Winston.
+
+
+================================================================================
+TESTING
+================================================================================
+
+Use Jest as the test runner. Use Supertest for HTTP integration tests.
+Use mongodb-memory-server to spin up an in-memory MongoDB instance for tests
+so no real database is needed. Reset and reseed the in-memory database before
+each test suite. Mock Redis using ioredis-mock.
+
+Unit tests. Write unit tests for every service function. Mock all external
+dependencies: Mongoose models, Redis, LiveKit SDK, Stripe SDK, OpenAI SDK,
+nodemailer, Cloudinary, Firebase Admin, Google APIs. Test happy paths, edge
+cases, and error cases. Cover: all auth service functions, all user service
+functions, all meeting service functions, all recording service functions,
+all AI service functions, all billing service functions, all notification
+service functions, all job processor functions, all validators, all utils,
+and all middleware functions.
+
+Integration tests. Write integration tests for every API route using Supertest
+against the Express app with the in-memory MongoDB. Check response status
+codes, response body structure, and database state. Cover: full authentication
+flows including registration, email verification, login, 2FA, OAuth, refresh,
+and logout. Full meeting lifecycle from creation to end. Full recording
+lifecycle. All AI endpoints. Stripe webhook handling for all event types.
+LiveKit webhook handling for all event types. Plan limit enforcement on
+every limited feature. Role-based access control on every protected route.
+Rate limiting behavior. Waiting room flow. Breakout room flow. Poll and Q and A
+flow. Organization and member management. Availability booking flow. GDPR
+request flow.
+
+Test coverage. Configure Jest coverage collection. Enforce minimum 85 percent
+overall coverage. Fail the test run if below threshold. Generate an HTML
+coverage report.
+
+Test utilities in tests/helpers: createTestUser with role and plan options,
+createTestOrganization, createTestMeeting, generateTestJWT, mockStripeEvent,
+mockLiveKitWebhookPayload, mockOpenAIResponse, mockFirebaseAdmin.
+
+Package.json scripts: test, test:unit, test:integration, test:coverage,
+test:watch.
+
+
+================================================================================
+ENVIRONMENT CONFIGURATION
+================================================================================
+
+Provide a complete .env.example with every required variable and a description:
+
+MONGODB_URI — MongoDB connection string
+MONGODB_TEST_URI — in-memory MongoDB URI for tests (handled by mongodb-memory-server)
+REDIS_URL — Redis connection string
+JWT_ACCESS_SECRET
+JWT_REFRESH_SECRET
+JWT_ACCESS_EXPIRY — e.g. 15m
+JWT_REFRESH_EXPIRY — e.g. 7d
+LIVEKIT_URL
+LIVEKIT_API_KEY
+LIVEKIT_API_SECRET
+LIVEKIT_WEBHOOK_SECRET
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_FREE_PLAN_PRICE_ID
+STRIPE_PRO_PLAN_PRICE_ID
+STRIPE_BUSINESS_PLAN_PRICE_ID
+OPENAI_API_KEY
+OPENAI_MODEL — e.g. gpt-4o
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_REDIRECT_URI
+CLOUDINARY_CLOUD_NAME
+CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET
+SMTP_HOST
+SMTP_PORT
+SMTP_USER
+SMTP_PASS
+EMAIL_FROM
+FIREBASE_PROJECT_ID
+FIREBASE_PRIVATE_KEY
+FIREBASE_CLIENT_EMAIL
+FRONTEND_URL
+PORT
+NODE_ENV
+
+
+================================================================================
+DEPLOYMENT READINESS
+================================================================================
+
+Dockerfile using multi-stage build. Final image minimal and production-ready.
+
+docker-compose.yml including: backend service, MongoDB, Redis, Bull Board.
+Configure MongoDB volume for persistence.
+
+Health check endpoint at /health returning server status, MongoDB connection
+state, Redis ping result, and app version from package.json.
+
+Winston logging. Log all requests, errors, and background job events as JSON
+in production and human-readable in development. Include request IDs in all
+logs.
+
+Request ID middleware. Assign unique ID per request. Include in logs and
+response headers.
+
+Graceful shutdown on SIGTERM and SIGINT. Finish in-progress requests, close
+Mongoose connection, drain Bull queues, exit.
+
+README.md with project overview, tech stack, prerequisites, step-by-step
+local setup, environment variable guide, how to run tests, how to run with
+Docker, API docs link, and deployment notes.
+
+
+================================================================================
+IMPORTANT RULES FOR CODEX
+================================================================================
+
+Implement every feature described above completely and without omission.
+No stubs. No placeholders. No TODOs. Every function must be fully implemented.
+
+Use MongoDB and Mongoose throughout. Never reference PostgreSQL or Prisma.
+
+Separate concerns strictly. Controllers handle HTTP only. Services contain
+all business logic. Mongoose models handle all database interaction.
+
+Every route must have authentication middleware where required, Zod validation
+middleware, and role authorization middleware where applicable.
+
+Use async/await throughout. Handle all promise rejections. Never let
+unhandled rejections crash the server.
+
+All external API calls must have error handling that catches SDK or HTTP errors
+and converts them to appropriate custom application errors.
+
+Comment all non-obvious logic. Write JSDoc comments for all exported functions.
+
+Follow REST conventions. Correct HTTP methods and status codes. Prefix all
+routes with /api/v1.
+
+All tests must pass. Coverage must meet or exceed 85 percent.
+
+The .env.example and README must be complete and thorough.
+
+The final codebase must be clean, maintainable, and ready for another
+developer to pick up without any additional explanation.
+
+================================================================================
+END OF CODEX PROMPT — ONNONN BACKEND (MongoDB + Mongoose)
+================================================================================
