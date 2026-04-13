@@ -32,11 +32,23 @@ module.exports = defineConfig({
             return undefined;
           }
 
+          if (
+            id.includes("/react/") ||
+            id.includes("\\react\\") ||
+            id.includes("/react-dom/") ||
+            id.includes("\\react-dom\\") ||
+            id.includes("/scheduler/") ||
+            id.includes("\\scheduler\\") ||
+            id.includes("react-router") ||
+            id.includes("@remix-run") ||
+            id.includes("zustand") ||
+            id.includes("react-hook-form") ||
+            id.includes("lucide-react")
+          ) {
+            return "vendor-react";
+          }
           if (id.includes("@livekit") || id.includes("livekit-client")) {
             return "vendor-livekit";
-          }
-          if (id.includes("react") || id.includes("react-dom") || id.includes("react-router")) {
-            return "vendor-react";
           }
           if (id.includes("recharts")) {
             return "vendor-charts";
