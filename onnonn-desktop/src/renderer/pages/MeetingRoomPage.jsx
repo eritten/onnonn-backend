@@ -34,6 +34,7 @@ import { LoadingButton } from "../components/LoadingButton";
 import { Modal } from "../components/Modal";
 import { ReactionPicker } from "../components/ReactionPicker";
 import { useAuthStore } from "../store/authStore";
+import { useUiStore } from "../store/uiStore";
 import sharedConfig from "../../shared/config.json";
 
 const { LIVEKIT_URL } = sharedConfig;
@@ -475,6 +476,7 @@ function WaitingRoomPanel({ meeting, isHost }) {
 
 function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMeetingClosed }) {
   const room = useRoomContext();
+  const announce = useUiStore((state) => state.announce);
   const [liveParticipants, setLiveParticipants] = useState([]);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
@@ -549,6 +551,59 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
       room.off(RoomEvent.DataReceived, handleData);
     };
   }, [onMeetingClosed, room]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      const targetTag = event.target?.tagName?.toLowerCase();
+      if (["input", "textarea", "select"].includes(targetTag)) {
+        return;
+      }
+
+      switch (event.key.toLowerCase()) {
+        case "m":
+          event.preventDefault();
+          toggleMic().catch(() => {});
+          announce("Microphone toggled.");
+          break;
+        case "c":
+          event.preventDefault();
+          toggleCamera().catch(() => {});
+          announce("Camera toggled.");
+          break;
+        case "s":
+          event.preventDefault();
+          shareScreen().catch(() => {});
+          announce("Choose a screen to share.");
+          break;
+        case "h":
+          event.preventDefault();
+          toggleHand().catch(() => {});
+          announce(handRaised ? "Hand lowered." : "Hand raised.");
+          break;
+        case "r":
+          event.preventDefault();
+          toggleRecording().catch(() => {});
+          announce(recording ? "Stopping recording." : "Starting recording.");
+          break;
+        case "escape":
+          if (panel) {
+            event.preventDefault();
+            setPanel(null);
+            announce("Side panel closed.");
+          }
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [announce, handRaised, panel, recording, setPanel]);
 
   async function toggleMic() {
     await room.localParticipant.setMicrophoneEnabled(muted);

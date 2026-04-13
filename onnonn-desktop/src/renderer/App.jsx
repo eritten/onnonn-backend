@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { useAuthBootstrap } from "./hooks/useAuthBootstrap";
 import { useOffline } from "./hooks/useOffline";
 import { useAuthStore } from "./store/authStore";
+import { useUiStore } from "./store/uiStore";
 import { authService } from "./services/authService";
 import { orgService } from "./services/otherServices";
 
@@ -36,6 +37,14 @@ function ScreenFallback() {
 
 function OfflineBanner() {
   const offline = useOffline();
+  const announce = useUiStore((state) => state.announce);
+
+  useEffect(() => {
+    if (offline) {
+      announce("You are offline. Some features may be unavailable.");
+    }
+  }, [announce, offline]);
+
   if (!offline) {
     return null;
   }
@@ -43,6 +52,25 @@ function OfflineBanner() {
   return (
     <div className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 rounded-full border border-brand-warning/40 bg-brand-warning/15 px-5 py-3 text-sm font-medium text-brand-text shadow-panel">
       You are offline. Some Onnonn features may be unavailable until your connection returns.
+    </div>
+  );
+}
+
+function AccessibilityAnnouncer() {
+  const announcement = useUiStore((state) => state.announcement);
+  const clearAnnouncement = useUiStore((state) => state.clearAnnouncement);
+
+  useEffect(() => {
+    if (!announcement) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => clearAnnouncement(), 2500);
+    return () => window.clearTimeout(timer);
+  }, [announcement, clearAnnouncement]);
+
+  return (
+    <div aria-live="polite" aria-atomic="true" role="status" className="sr-only">
+      {announcement}
     </div>
   );
 }
@@ -78,6 +106,9 @@ function RouteEvents() {
   const location = useLocation();
   const status = useAuthStore((state) => state.status);
   const setExternalSession = useAuthStore((state) => state.setExternalSession);
+  const setPendingMeetingJoin = useUiStore((state) => state.setPendingMeetingJoin);
+  const consumePendingMeetingJoin = useUiStore((state) => state.consumePendingMeetingJoin);
+  const announce = useUiStore((state) => state.announce);
 
   useEffect(() => {
     const completeGoogleLogin = async (code) => {
@@ -98,6 +129,24 @@ function RouteEvents() {
     const handleProtocolUrl = async (url) => {
       try {
         const parsed = new URL(url);
+        if (parsed.host === "meeting" && parsed.pathname.includes("/join")) {
+          const payload = {
+            meetingId: parsed.searchParams.get("meetingId"),
+            title: parsed.searchParams.get("title") || "Meeting"
+          };
+          if (!payload.meetingId) {
+            throw new Error("Meeting ID was missing from the desktop link.");
+          }
+          if (status === "authenticated") {
+            await window.electronAPI.openMeetingWindow(payload);
+            announce(`Opening meeting ${payload.title}.`);
+            return;
+          }
+          setPendingMeetingJoin(payload);
+          navigate("/login", { replace: true });
+          announce("Sign in to continue to your meeting.");
+          return;
+        }
         const code = parsed.pathname.includes("/google/callback") ? parsed.searchParams.get("code") : null;
         const state = parsed.searchParams.get("state");
         const email = parsed.searchParams.get("email");
@@ -116,6 +165,7 @@ function RouteEvents() {
         }
       } catch (_error) {
         toast.error("Could not complete the desktop callback.");
+        announce("The desktop link could not be completed.");
       }
     };
 
@@ -130,13 +180,25 @@ function RouteEvents() {
     }).catch(() => {});
     window.electronAPI.onProtocolUrl(handleProtocolUrl);
     window.electronAPI.onStartInstantMeeting(handleStartInstantMeeting);
-  }, [navigate, setExternalSession]);
+  }, [announce, navigate, setExternalSession, setPendingMeetingJoin, status]);
 
   useEffect(() => {
     if (status === "authenticated" && ["/", "/login", "/register"].includes(location.pathname)) {
       navigate("/app/home", { replace: true });
     }
   }, [location.pathname, navigate, status]);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      return;
+    }
+    const pendingMeetingJoin = consumePendingMeetingJoin();
+    if (!pendingMeetingJoin?.meetingId) {
+      return;
+    }
+    window.electronAPI.openMeetingWindow(pendingMeetingJoin).catch(() => {});
+    announce(`Opening meeting ${pendingMeetingJoin.title || pendingMeetingJoin.meetingId}.`);
+  }, [announce, consumePendingMeetingJoin, status]);
 
   return null;
 }
@@ -146,6 +208,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <AccessibilityAnnouncer />
       <OfflineBanner />
       <RouteEvents />
       <Suspense fallback={<ScreenFallback />}>

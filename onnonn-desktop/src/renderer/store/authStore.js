@@ -94,6 +94,30 @@ export const useAuthStore = create((set, get) => ({
     get().scheduleRefresh();
     return session;
   },
+  async refreshCurrentUser() {
+    const session = get().session || await window.electronAPI.getSession();
+    if (!session?.accessToken) {
+      return null;
+    }
+    const user = await authService.me(session.accessToken);
+    const nextSession = {
+      ...session,
+      user
+    };
+    await window.electronAPI.setSession(nextSession);
+    set({ session: nextSession, user });
+    return user;
+  },
+  async updateCurrentUser(user) {
+    const session = get().session || await window.electronAPI.getSession();
+    const nextSession = {
+      ...(session || {}),
+      user
+    };
+    await window.electronAPI.setSession(nextSession);
+    set({ session: nextSession, user });
+    return user;
+  },
   scheduleRefresh() {
     if (refreshTimer) {
       window.clearTimeout(refreshTimer);

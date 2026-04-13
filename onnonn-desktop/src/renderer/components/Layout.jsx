@@ -27,7 +27,9 @@ export function Layout() {
   const toggleNotifications = useUiStore((state) => state.toggleNotifications);
   const globalSearch = useUiStore((state) => state.globalSearch);
   const setGlobalSearch = useUiStore((state) => state.setGlobalSearch);
+  const announce = useUiStore((state) => state.announce);
   const seenNotificationIds = useRef([]);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
     orgService.notifications().then(setNotifications).catch(() => {});
@@ -49,6 +51,54 @@ export function Layout() {
     }
     seenNotificationIds.current = notifications.map((notification) => notification._id);
   }, [notifications]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        announce("Search focused.");
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        navigate("/app/meetings?new=instant");
+        announce("Opening instant meeting form.");
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+        event.preventDefault();
+        navigate("/app/settings");
+        announce("Opening settings.");
+        return;
+      }
+
+      if (event.altKey && /^[1-6]$/.test(event.key)) {
+        event.preventDefault();
+        const target = navItems[Number(event.key) - 1];
+        if (target) {
+          navigate(target.to);
+          announce(`${target.label} opened.`);
+        }
+        return;
+      }
+
+      if (event.key === "Escape" && notificationsOpen) {
+        event.preventDefault();
+        toggleNotifications();
+        announce("Notifications closed.");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [announce, navigate, notificationsOpen, toggleNotifications]);
 
   const pageTitle = navItems.find((item) => location.pathname.startsWith(item.to))?.label || "Onnonn";
   const unreadCount = notifications.filter((notification) => !notification.isRead).length;
@@ -114,6 +164,7 @@ export function Layout() {
           <div className="mx-auto flex w-full max-w-xl items-center rounded-2xl border border-brand-800 bg-brand-900 px-3">
             <Search size={18} className="text-brand-muted" />
             <input
+              ref={searchInputRef}
               className="w-full bg-transparent px-3 py-3 text-sm outline-none"
               placeholder="Search meetings semantically"
               value={globalSearch}

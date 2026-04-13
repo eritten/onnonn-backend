@@ -8,7 +8,9 @@ const {
   PasswordResetToken,
   EmailVerificationToken,
   TwoFactorSecret,
-  Subscription
+  Subscription,
+  OrganizationMember,
+  Availability
 } = require("../models");
 const { createCustomer } = require("./stripeService");
 const { getFreePlan } = require("./planService");
@@ -311,9 +313,11 @@ async function updateProfile(userId, payload) {
 }
 
 async function getCurrentUserProfile(userId) {
-  const [user, subscription] = await Promise.all([
+  const [user, subscription, membership, availability] = await Promise.all([
     User.findById(userId),
-    Subscription.findOne({ user: userId }).populate("plan")
+    Subscription.findOne({ user: userId }).populate("plan"),
+    OrganizationMember.findOne({ user: userId }).populate("organization"),
+    Availability.findOne({ user: userId })
   ]);
 
   if (!user) {
@@ -325,6 +329,19 @@ async function getCurrentUserProfile(userId) {
     name: subscription.plan?.name || null,
     status: subscription.status,
     storageUsedBytes: subscription.storageUsedBytes || 0
+  } : null;
+  profile.organizationId = membership?.organization?._id || membership?.organization || null;
+  profile.organization = membership?.organization ? {
+    _id: membership.organization._id,
+    name: membership.organization.name,
+    role: membership.role
+  } : null;
+  profile.availability = availability ? {
+    bookingHandle: availability.bookingHandle,
+    meetingDuration: availability.meetingDuration,
+    bufferMinutes: availability.bufferMinutes,
+    isActive: availability.isActive,
+    slots: availability.slots
   } : null;
   return profile;
 }

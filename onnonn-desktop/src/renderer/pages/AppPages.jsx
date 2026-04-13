@@ -30,6 +30,7 @@ export function DashboardPage() {
   const [recordings, setRecordings] = useState([]);
   const [results, setResults] = useState([]);
   const search = useUiStore((state) => state.globalSearch);
+  const announce = useUiStore((state) => state.announce);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -79,7 +80,10 @@ export function DashboardPage() {
                   <p className="font-medium">{meeting.title}</p>
                   <p className="text-sm text-brand-muted">{meeting.scheduledStartTime ? format(new Date(meeting.scheduledStartTime), "PPpp") : "Instant meeting"}</p>
                 </div>
-                <button className="btn-primary" onClick={() => navigate(`/app/meetings/${meeting.meetingId}`)}>Join</button>
+                <button className="btn-primary" onClick={() => {
+                  window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title });
+                  announce(`Opening ${meeting.title}.`);
+                }}>Join</button>
               </div>
             ))}
           </div>
@@ -112,6 +116,7 @@ export function MeetingsPage() {
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(Boolean(searchParams.get("new")));
   const [payload, setPayload] = useState({ title: "", description: "", scheduledStartTime: "", expectedDuration: 30, maxParticipants: 10, meetingType: "group", waitingRoomEnabled: false, muteOnEntry: false, allowSelfUnmute: true, autoRecord: false, e2eEncryptionEnabled: false, invitedParticipants: [] });
+  const announce = useUiStore((state) => state.announce);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -161,7 +166,10 @@ export function MeetingsPage() {
                 <p className="text-xs text-brand-muted">Meeting ID: {meeting.meetingId}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button className="btn-primary" onClick={() => navigate(`/app/meetings/${meeting.meetingId}`)}>Join</button>
+                <button className="btn-primary" onClick={() => {
+                  window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title });
+                  announce(`Opening ${meeting.title}.`);
+                }}>Join</button>
                 <button className="btn-secondary" onClick={() => navigate(`/app/meetings/${meeting.meetingId}`)}>Edit</button>
                 <button className="btn-secondary" onClick={() => meetingService.cancel(meeting.meetingId).then((updated) => setItems((current) => current.map((item) => item.meetingId === meeting.meetingId ? updated : item)))}>Cancel</button>
                 <button className="btn-secondary" onClick={() => meetingService.cancel(meeting.meetingId).then(() => setItems((current) => current.filter((item) => item.meetingId !== meeting.meetingId)))}>Delete</button>
@@ -242,7 +250,10 @@ export function MeetingDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Section title={meeting.title} actions={<button className="btn-primary" onClick={() => window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title })}>Join</button>}>
+      <Section title={meeting.title} actions={<button className="btn-primary" onClick={() => {
+        window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title });
+        announce(`Opening ${meeting.title}.`);
+      }}>Join</button>}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <p className="text-sm text-brand-muted">{meeting.description || "No description provided."}</p>
@@ -367,6 +378,8 @@ export function ContactsPage() {
 
 export function OrganizationPage() {
   const user = useAuthStore((state) => state.user);
+  const refreshCurrentUser = useAuthStore((state) => state.refreshCurrentUser);
+  const announce = useUiStore((state) => state.announce);
   const [organization, setOrganization] = useState(null);
   const [members, setMembers] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -388,7 +401,12 @@ export function OrganizationPage() {
       <Section title="Create organization">
         <div className="grid gap-4 md:grid-cols-[1fr,auto]">
           <input className="field" placeholder="Organization name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-          <button className="btn-primary" onClick={() => orgService.create({ name: form.name }).then(setOrganization)}>Create organization</button>
+          <button className="btn-primary" onClick={() => orgService.create({ name: form.name }).then(async (created) => {
+            setOrganization(created);
+            await refreshCurrentUser();
+            toast.success("Organization created.");
+            announce("Organization created.");
+          })}>Create organization</button>
         </div>
       </Section>
     );
@@ -408,11 +426,18 @@ export function OrganizationPage() {
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
-          <button className="btn-primary" onClick={() => orgService.invite(activeOrganizationId, { email: form.email, role: form.role }).then(() => toast.success("Invitation sent."))}>Send invitation</button>
+          <button className="btn-primary" onClick={() => orgService.invite(activeOrganizationId, { email: form.email, role: form.role }).then(() => {
+            toast.success("Invitation sent.");
+            announce("Invitation sent.");
+          })}>Send invitation</button>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr,auto]">
           <input className="field" placeholder="Paste invitation token to accept" value={form.inviteToken} onChange={(event) => setForm((current) => ({ ...current, inviteToken: event.target.value }))} />
-          <button className="btn-secondary" onClick={() => orgService.acceptInvite(form.inviteToken).then(() => toast.success("Invitation accepted."))}>Accept invitation</button>
+          <button className="btn-secondary" onClick={() => orgService.acceptInvite(form.inviteToken).then(async () => {
+            toast.success("Invitation accepted.");
+            announce("Invitation accepted.");
+            await refreshCurrentUser();
+          })}>Accept invitation</button>
         </div>
       </Section>
       <Section title="Departments">
@@ -454,6 +479,8 @@ export function OrganizationPage() {
 
 export function SettingsPage() {
   const user = useAuthStore((state) => state.user);
+  const refreshCurrentUser = useAuthStore((state) => state.refreshCurrentUser);
+  const announce = useUiStore((state) => state.announce);
   const [profile, setProfile] = useState(user || {});
   const [preferences, setPreferences] = useState({});
   const [sessions, setSessions] = useState([]);
@@ -467,6 +494,19 @@ export function SettingsPage() {
     authService.listSessions().then(setSessions).catch(() => {});
     orgService.googleCalendarStatus().then(setGoogleStatus).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setProfile(user || {});
+    if (user?.availability) {
+      setAvailability({
+        bookingHandle: user.availability.bookingHandle || "",
+        slots: user.availability.slots || [],
+        meetingDuration: user.availability.meetingDuration || 30,
+        bufferMinutes: user.availability.bufferMinutes || 15,
+        isActive: user.availability.isActive ?? true
+      });
+    }
+  }, [user]);
 
   return (
     <div className="space-y-6">
@@ -488,9 +528,11 @@ export function SettingsPage() {
               reader.onload = () => setProfile((current) => ({ ...current, profilePhotoUrl: reader.result }));
               reader.readAsDataURL(file);
             }} />
-            <button className="btn-primary" onClick={() => authService.updateProfile(profile).then((updated) => {
+            <button className="btn-primary" onClick={() => authService.updateProfile(profile).then(async (updated) => {
               setProfile(updated);
+              await refreshCurrentUser();
               toast.success("Profile updated.");
+              announce("Profile updated.");
             })}>Save</button>
           </div>
         </div>
@@ -500,11 +542,20 @@ export function SettingsPage() {
           <button className="btn-secondary" onClick={() => authService.setup2FA().then((setup) => {
             setTwoFactorSetup(setup);
             toast.success("Scan the QR code with your authenticator app.");
+            announce("Two-factor authentication setup is ready.");
           })}>Setup 2FA</button>
           {twoFactorSetup?.qrCode && <img src={twoFactorSetup.qrCode} alt="2FA QR code" className="w-48 rounded-2xl border border-brand-800 p-3" />}
           {twoFactorSetup?.qrCode ? <input className="field" placeholder="Enter 6-digit authenticator code" value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value)} /> : null}
-          {twoFactorSetup?.qrCode ? <button className="btn-primary" onClick={() => authService.enable2FA(twoFactorCode).then(() => toast.success("Two-factor authentication enabled."))}>Enable 2FA</button> : null}
-          <button className="btn-secondary" onClick={() => authService.disable2FA(prompt("Enter your password to disable 2FA") || "")}>Disable 2FA</button>
+          {twoFactorSetup?.qrCode ? <button className="btn-primary" onClick={() => authService.enable2FA(twoFactorCode).then(async () => {
+            toast.success("Two-factor authentication enabled.");
+            announce("Two-factor authentication enabled.");
+            await refreshCurrentUser();
+          })}>Enable 2FA</button> : null}
+          <button className="btn-secondary" onClick={() => authService.disable2FA(prompt("Enter your password to disable 2FA") || "").then(async () => {
+            toast.success("Two-factor authentication disabled.");
+            announce("Two-factor authentication disabled.");
+            await refreshCurrentUser();
+          })}>Disable 2FA</button>
         </div>
       </Section>
       <Section title="Notification preferences">
@@ -527,7 +578,11 @@ export function SettingsPage() {
               ))}
             </div>
           ))}
-          <button className="btn-primary" onClick={() => orgService.updatePreferences(preferences)}>Save preferences</button>
+          <button className="btn-primary" onClick={() => orgService.updatePreferences(preferences).then((updated) => {
+            setPreferences(updated || preferences);
+            toast.success("Notification preferences saved.");
+            announce("Notification preferences saved.");
+          })}>Save preferences</button>
         </div>
       </Section>
       <Section title="Connected accounts">
@@ -537,8 +592,15 @@ export function SettingsPage() {
             <p className="text-sm text-brand-muted">{googleStatus?.connected ? "Connected" : "Not connected"}</p>
           </div>
           <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => authService.getGoogleUrl().then((url) => window.electronAPI.openExternal(buildDesktopOAuthUrl(url, "calendar")))}>Connect</button>
-            <button className="btn-secondary" onClick={() => orgService.googleCalendarDisconnect().then(() => setGoogleStatus({ connected: false }))}>Disconnect</button>
+            <button className="btn-secondary" onClick={() => authService.getGoogleUrl().then((url) => {
+              announce("Opening Google Calendar connection in your browser.");
+              return window.electronAPI.openExternal(buildDesktopOAuthUrl(url, "calendar"));
+            })}>Connect</button>
+            <button className="btn-secondary" onClick={() => orgService.googleCalendarDisconnect().then(() => {
+              setGoogleStatus({ connected: false });
+              toast.success("Google Calendar disconnected.");
+              announce("Google Calendar disconnected.");
+            })}>Disconnect</button>
           </div>
         </div>
       </Section>
@@ -548,11 +610,20 @@ export function SettingsPage() {
           <input className="field" type="number" placeholder="Meeting duration" value={availability.meetingDuration} onChange={(event) => setAvailability((current) => ({ ...current, meetingDuration: Number(event.target.value) }))} />
           <input className="field" type="number" placeholder="Buffer minutes" value={availability.bufferMinutes} onChange={(event) => setAvailability((current) => ({ ...current, bufferMinutes: Number(event.target.value) }))} />
           <label className="panel flex items-center justify-between px-4 py-3"><span>Availability enabled</span><input type="checkbox" checked={availability.isActive} onChange={(event) => setAvailability((current) => ({ ...current, isActive: event.target.checked }))} /></label>
-          <button className="btn-primary md:col-span-2" onClick={() => orgService.upsertAvailability(availability)}>Save availability</button>
+          <button className="btn-primary md:col-span-2" onClick={() => orgService.upsertAvailability(availability).then(async (saved) => {
+            setAvailability(saved);
+            toast.success("Availability saved.");
+            announce("Availability saved.");
+            await refreshCurrentUser();
+          })}>Save availability</button>
         </div>
       </Section>
       <Section title="Session management">
-        {sessions.length ? sessions.map((session) => <div key={session._id} className="mb-3 flex items-center justify-between rounded-2xl border border-brand-800 p-4"><div><p className="font-medium">{session.userAgent || "Unknown device"}</p><p className="text-sm text-brand-muted">{session.ipAddress || "Unknown IP"}</p></div><button className="btn-secondary" onClick={() => authService.revokeSession(session._id).then(() => setSessions((items) => items.filter((item) => item._id !== session._id)))}>Revoke</button></div>) : <EmptyState title="No active sessions listed" description="Signed-in devices will appear here for quick revocation." />}
+        {sessions.length ? sessions.map((session) => <div key={session._id} className="mb-3 flex items-center justify-between rounded-2xl border border-brand-800 p-4"><div><p className="font-medium">{session.userAgent || "Unknown device"}</p><p className="text-sm text-brand-muted">{session.ipAddress || "Unknown IP"}</p></div><button className="btn-secondary" onClick={() => authService.revokeSession(session._id).then(() => {
+          setSessions((items) => items.filter((item) => item._id !== session._id));
+          toast.success("Session revoked.");
+          announce("Session revoked.");
+        })}>Revoke</button></div>) : <EmptyState title="No active sessions listed" description="Signed-in devices will appear here for quick revocation." />}
       </Section>
       <Section title="Danger zone">
         <button className="btn-secondary" onClick={() => {
@@ -565,3 +636,4 @@ export function SettingsPage() {
     </div>
   );
 }
+  const announce = useUiStore((state) => state.announce);
