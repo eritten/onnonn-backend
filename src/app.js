@@ -21,6 +21,8 @@ const { authorize } = require("./middlewares/authorize");
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 app.use(helmet());
 app.use(cors({ origin: env.frontendUrl, credentials: true }));
 app.use("/api/v1/webhooks/stripe", express.raw({ type: "application/json" }));
@@ -30,9 +32,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(requestIdMiddleware);
 app.use(requestLoggerMiddleware);
-app.use(apiRateLimit);
 
 app.get("/health", healthController);
+app.use(apiRateLimit);
 app.use("/api/v1", apiRoutes);
 
 const swaggerSpec = createSwaggerSpec();
