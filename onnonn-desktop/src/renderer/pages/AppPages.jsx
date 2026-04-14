@@ -234,6 +234,7 @@ export function MeetingDetailPage() {
   const [coaching, setCoaching] = useState(null);
   const [sentiment, setSentiment] = useState(null);
   const [notes, setNotes] = useState([]);
+  const announce = useUiStore((state) => state.announce);
 
   useEffect(() => {
     meetingService.get(meetingId).then(setMeeting);
@@ -636,4 +637,3 @@ export function SettingsPage() {
     </div>
   );
 }
-  const announce = useUiStore((state) => state.announce);
