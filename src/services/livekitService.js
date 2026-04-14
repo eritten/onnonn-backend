@@ -51,8 +51,14 @@ async function startRecording(roomName, outputFilepath) {
   if (!egressClient) {
     return { egressId: `mock-egress-${roomName}`, roomName, outputFilepath };
   }
+  const normalizedOutputPath = String(outputFilepath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const egressFilepath = normalizedOutputPath.startsWith("home/egress/recordings/")
+    ? `/${normalizedOutputPath}`
+    : `/home/egress/recordings/${normalizedOutputPath.replace(/^recordings\/?/, "")}`;
   return egressClient.startRoomCompositeEgress(roomName, {
-    file: { filepath: outputFilepath }
+    file: { filepath: egressFilepath }
   });
 }
 

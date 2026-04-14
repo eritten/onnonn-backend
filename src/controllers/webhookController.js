@@ -75,6 +75,12 @@ module.exports = {
         { status: "processing" }
       );
     }
+    if (event.event === "egress_failed" || event.event === "egress_aborted") {
+      await Recording.findOneAndUpdate(
+        { liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id },
+        { status: "failed" }
+      );
+    }
     if (event.event === "egress_ended") {
       const recording = await Recording.findOne({ liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id });
       if (recording) {
