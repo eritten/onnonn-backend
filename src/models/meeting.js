@@ -143,6 +143,8 @@ const recordingSchema = new Schema({
   meeting: { type: Schema.Types.ObjectId, ref: "Meeting", required: true, index: true },
   host: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   liveKitEgressId: { type: String, index: true },
+  egressOutputPath: String,
+  egressOutputUrl: String,
   status: { type: String, enum: ["pending", "recording", "processing", "ready", "failed", "deleted"], default: "pending", index: true },
   startTime: Date,
   endTime: Date,

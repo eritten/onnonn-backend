@@ -106,6 +106,12 @@ module.exports = {
             sourceUrl,
             sourcePath: location,
             egressInfo: event.egressInfo || {}
+          }, {
+            delay: 5000,
+            attempts: 8,
+            backoff: { type: "fixed", delay: 15000 },
+            removeOnComplete: true,
+            removeOnFail: false
           });
         }
         const transcriptionQueue = getQueue("ai-transcription");

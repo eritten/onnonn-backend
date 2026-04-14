@@ -5,6 +5,18 @@ const { randomToken } = require("../utils/crypto");
 const { uploadBufferToProvider } = require("./storageService");
 const { NotFoundError, PlanLimitError, AuthorizationError, LiveKitError } = require("../utils/errors");
 const { getPagination } = require("../utils/pagination");
+const env = require("../config/env");
+
+function buildRecordingOutputTargets(meetingId) {
+  const filename = `${meetingId}-${Date.now()}.mp4`;
+  const sourcePath = `/home/egress/recordings/${filename}`;
+  const publicBase = String(env.livekitUrl || "").replace(/^wss?:\/\//i, "https://").replace(/\/+$/, "");
+  return {
+    filename,
+    sourcePath,
+    sourceUrl: publicBase ? `${publicBase}/recordings/${filename}` : null
+  };
+}
 
 async function startMeetingRecording(meetingId, userId) {
   const meeting = await Meeting.findOne({ meetingId });
@@ -25,8 +37,9 @@ async function startMeetingRecording(meetingId, userId) {
     });
   }
   let egress;
+  const output = buildRecordingOutputTargets(meetingId);
   try {
-    egress = await startRecording(meeting.liveKitRoomName, `recordings/${meetingId}-${Date.now()}.mp4`);
+    egress = await startRecording(meeting.liveKitRoomName, output.sourcePath);
   } catch (error) {
     const lowerMessage = String(error.message || "").toLowerCase();
     const unavailableMessage = lowerMessage.includes("twirp") || lowerMessage.includes("no response from servers") || lowerMessage.includes("network");
@@ -41,6 +54,8 @@ async function startMeetingRecording(meetingId, userId) {
     meeting: meeting._id,
     host: userId,
     liveKitEgressId: egress.egressId || egress.egress_id,
+    egressOutputPath: output.sourcePath,
+    egressOutputUrl: output.sourceUrl,
     status: "recording",
     startTime: new Date(),
     storageProvider: "cloudinary"
@@ -59,6 +74,21 @@ async function stopMeetingRecording(recordingId, userId) {
   recording.status = "processing";
   recording.endTime = new Date();
   await recording.save();
+  const { getQueue } = require("../jobs");
+  const recordingQueue = getQueue("recording-processing");
+  if (recordingQueue && (recording.egressOutputUrl || recording.egressOutputPath)) {
+    await recordingQueue.add({
+      recordingId: recording._id.toString(),
+      sourceUrl: recording.egressOutputUrl || null,
+      sourcePath: recording.egressOutputPath || null
+    }, {
+      delay: 20000,
+      attempts: 8,
+      backoff: { type: "fixed", delay: 15000 },
+      removeOnComplete: true,
+      removeOnFail: false
+    });
+  }
   return recording;
 }
 
@@ -66,6 +96,9 @@ async function finalizeRecording({ recordingId, fileBuffer }) {
   const recording = await Recording.findById(recordingId);
   if (!recording) {
     throw new NotFoundError("Recording not found");
+  }
+  if (recording.status === "ready" && recording.fileUrl) {
+    return recording;
   }
   if (!fileBuffer) {
     throw new LiveKitError("Recording output is not reachable yet. Please verify the LiveKit recording file location or try again once the egress file is available.");
