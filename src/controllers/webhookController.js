@@ -5,6 +5,7 @@ const { verifyWebhook } = require("../services/livekitService");
 const { Recording, Meeting, MeetingParticipant } = require("../models");
 const { getQueue } = require("../jobs");
 const env = require("../config/env");
+const { logger } = require("../config/logger");
 
 function buildRecordingSourceUrl(location) {
   if (!location) {
@@ -37,6 +38,11 @@ module.exports = {
   livekit: asyncHandler(async (req, res) => {
     const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : JSON.stringify(req.body);
     const event = await verifyWebhook(payload, req.headers.authorization);
+    logger.info("LiveKit webhook received", {
+      event: event.event,
+      roomName: event.room?.name || event.egressInfo?.roomName || event.egressInfo?.room_name || null,
+      egressId: event.egressInfo?.egressId || event.egressInfo?.egress_id || null
+    });
     const roomName = event.room?.name || event.egressInfo?.roomName;
     const meeting = roomName ? await Meeting.findOne({ liveKitRoomName: roomName }) : null;
     if (event.event === "room_started" && meeting) {
@@ -89,6 +95,12 @@ module.exports = {
         const location = fileResult?.location || fileResult?.filepath || event.egressInfo?.file?.filepath || null;
         const sourceUrl = buildRecordingSourceUrl(location);
         if (recordingQueue) {
+          logger.info("Queueing recording processing job", {
+            recordingId: recording._id.toString(),
+            egressId: recording.liveKitEgressId,
+            sourceUrl,
+            sourcePath: location
+          });
           await recordingQueue.add({
             recordingId: recording._id.toString(),
             sourceUrl,

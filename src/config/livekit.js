@@ -17,7 +17,10 @@ function normalizeServerSdkUrl(url) {
 const livekitServerUrl = normalizeServerSdkUrl(env.livekitUrl);
 const roomService = livekitServerUrl ? new RoomServiceClient(livekitServerUrl, env.livekitApiKey, env.livekitApiSecret) : null;
 const egressClient = livekitServerUrl ? new EgressClient(livekitServerUrl, env.livekitApiKey, env.livekitApiSecret) : null;
-const livekitWebhookReceiver = env.livekitWebhookSecret ? new WebhookReceiver(env.livekitWebhookSecret) : null;
+const livekitWebhookSecret = env.livekitWebhookSecret || env.livekitApiSecret || "";
+const livekitWebhookReceiver = env.livekitApiKey && livekitWebhookSecret
+  ? new WebhookReceiver(env.livekitApiKey, livekitWebhookSecret)
+  : null;
 
 async function buildLiveKitToken({ identity, name, roomName, canPublish = true, canSubscribe = true, canPublishData = true }) {
   const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, { identity, name });
@@ -25,4 +28,11 @@ async function buildLiveKitToken({ identity, name, roomName, canPublish = true, 
   return await token.toJwt();
 }
 
-module.exports = { roomService, egressClient, livekitWebhookReceiver, buildLiveKitToken, livekitServerUrl };
+module.exports = {
+  roomService,
+  egressClient,
+  livekitWebhookReceiver,
+  buildLiveKitToken,
+  livekitServerUrl,
+  livekitWebhookSecret
+};
