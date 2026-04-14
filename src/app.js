@@ -60,7 +60,14 @@ app.get("/join/:meetingId", async (req, res, next) => {
       return;
     }
 
-    const desktopUrl = `onnonn://meeting/join?meetingId=${encodeURIComponent(meeting.meetingId)}&title=${encodeURIComponent(meeting.title || "Meeting")}`;
+    const password = typeof req.query.password === "string" ? req.query.password : "";
+    const desktopJoinUrl = new URL("onnonn://meeting/join");
+    desktopJoinUrl.searchParams.set("meetingId", meeting.meetingId);
+    desktopJoinUrl.searchParams.set("title", meeting.title || "Meeting");
+    if (password) {
+      desktopJoinUrl.searchParams.set("password", password);
+    }
+    const desktopUrl = desktopJoinUrl.toString();
     res.type("html").send(`<!doctype html>
 <html lang="en">
   <head>
@@ -85,6 +92,7 @@ app.get("/join/:meetingId", async (req, res, next) => {
     <main class="card">
       <div class="eyebrow">Onnonn Meeting</div>
       <h1>${meeting.title || "Join your meeting"}</h1>
+      ${password ? "<p>Your invite link already includes the meeting password. You only need to enter your display name in the app.</p>" : ""}
       <p>We’re opening the Onnonn desktop app so you can join securely. If nothing happens, use the button below.</p>
       <div class="actions">
         <a class="primary" href="${desktopUrl}">Open in Onnonn</a>

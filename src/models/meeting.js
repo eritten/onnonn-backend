@@ -35,6 +35,13 @@ const meetingSchema = new Schema({
   ...auditFields
 });
 
+meetingSchema.set("toJSON", {
+  transform: (_doc, ret) => {
+    delete ret.passwordHash;
+    return ret;
+  }
+});
+
 const meetingParticipantSchema = new Schema({
   meeting: { type: Schema.Types.ObjectId, ref: "Meeting", required: true, index: true },
   user: { type: Schema.Types.ObjectId, ref: "User", index: true },

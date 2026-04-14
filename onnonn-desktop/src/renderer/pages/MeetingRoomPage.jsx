@@ -50,6 +50,10 @@ function normalizeTimestamp(value) {
   return value ? new Date(value).toISOString() : new Date().toISOString();
 }
 
+function getParticipantLabel(participant) {
+  return participant?.name || participant?.identity || "Participant";
+}
+
 function publishMeetingData(room, payload, options = {}) {
   if (!room?.localParticipant) {
     return Promise.resolve();
@@ -809,7 +813,7 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
       const publications = Array.from(participant.trackPublications.values?.() || []);
       return {
         identity: participant.identity,
-        name: participant.name || participant.identity,
+        name: getParticipantLabel(participant),
         audioEnabled: publications.some((publication) => publication.kind === Track.Kind.Audio && !publication.isMuted),
         videoEnabled: publications.some((publication) => publication.kind === Track.Kind.Video && !publication.isMuted)
       };
@@ -821,8 +825,20 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
     };
 
     syncParticipants();
-    room.on(RoomEvent.ParticipantConnected, syncParticipants);
-    room.on(RoomEvent.ParticipantDisconnected, syncParticipants);
+    const handleParticipantConnected = (participant) => {
+      syncParticipants();
+      const participantName = getParticipantLabel(participant);
+      toast.success(`${participantName} joined the meeting.`);
+      announce(`${participantName} joined the meeting.`);
+    };
+    const handleParticipantDisconnected = (participant) => {
+      syncParticipants();
+      const participantName = getParticipantLabel(participant);
+      toast(`${participantName} left the meeting.`);
+      announce(`${participantName} left the meeting.`);
+    };
+    room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+    room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
     room.on(RoomEvent.TrackMuted, syncParticipants);
     room.on(RoomEvent.TrackUnmuted, syncParticipants);
     room.localParticipant?.on(ParticipantEvent.LocalTrackPublished, syncParticipants);
@@ -848,13 +864,13 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
     room.on(RoomEvent.Disconnected, () => onMeetingClosed());
 
     return () => {
-      room.off(RoomEvent.ParticipantConnected, syncParticipants);
-      room.off(RoomEvent.ParticipantDisconnected, syncParticipants);
+      room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
+      room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.off(RoomEvent.TrackMuted, syncParticipants);
       room.off(RoomEvent.TrackUnmuted, syncParticipants);
       room.off(RoomEvent.DataReceived, handleData);
     };
-  }, [onMeetingClosed, room]);
+  }, [announce, onMeetingClosed, room]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -1006,10 +1022,12 @@ export function MeetingRoomPage() {
   const search = useMemo(() => new URLSearchParams(window.location.hash.split("?")[1] || ""), []);
   const meetingId = search.get("meetingId");
   const title = search.get("title");
+  const prefilledPassword = search.get("password") || "";
 
   useEffect(() => {
     const hydrate = async (incoming = null) => {
       const resolvedMeetingId = incoming?.meetingId || meetingId;
+      const resolvedPassword = incoming?.password || prefilledPassword;
       if (!resolvedMeetingId) {
         setError("Meeting ID is missing.");
         setLoading(false);
@@ -1023,7 +1041,8 @@ export function MeetingRoomPage() {
         setJoinForm((current) => ({
           ...current,
           displayName: user?.displayName || current.displayName,
-          email: user?.email || current.email
+          email: user?.email || current.email,
+          password: resolvedPassword || current.password
         }));
         setJoinModalOpen(true);
       } catch (_error) {
@@ -1038,7 +1057,7 @@ export function MeetingRoomPage() {
     return () => {
       offMeetingJoin?.();
     };
-  }, [meetingId, user?.displayName, user?.email]);
+  }, [meetingId, prefilledPassword, user?.displayName, user?.email]);
 
   async function joinMeeting() {
     if (!meeting) {
@@ -1110,10 +1129,16 @@ export function MeetingRoomPage() {
             <label htmlFor="join-email" className="field-label">Email</label>
             <input id="join-email" className="field" placeholder="Email" value={joinForm.email} onChange={(event) => setJoinForm((current) => ({ ...current, email: event.target.value }))} />
           </div>
-          <div className="space-y-2">
-            <label htmlFor="join-password" className="field-label">Meeting password</label>
-            <input id="join-password" className="field" type="password" placeholder="Meeting password (if required)" value={joinForm.password} onChange={(event) => setJoinForm((current) => ({ ...current, password: event.target.value }))} />
-          </div>
+          {prefilledPassword ? (
+            <div className="rounded-2xl border border-brand-accent/30 bg-brand-accent/10 px-4 py-3 text-sm text-brand-text">
+              This invite already includes the meeting password. Enter your display name and join.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label htmlFor="join-password" className="field-label">Meeting password</label>
+              <input id="join-password" className="field" type="password" placeholder="Meeting password (if required)" value={joinForm.password} onChange={(event) => setJoinForm((current) => ({ ...current, password: event.target.value }))} />
+            </div>
+          )}
           {error ? <p className="text-sm text-brand-error">{error}</p> : null}
           <LoadingButton loading={loading} className="btn-primary w-full" onClick={joinMeeting}>Join meeting</LoadingButton>
         </div>

@@ -49,6 +49,16 @@ async function getSubscriptionPlan(userId) {
   return { subscription, plan: subscription.plan instanceof Plan ? subscription.plan : await Plan.findById(subscription.plan) };
 }
 
+function buildMeetingJoinUrl(meetingId, password) {
+  const baseUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/join/${meetingId}`;
+  if (!password) {
+    return baseUrl;
+  }
+  const joinUrl = new URL(baseUrl);
+  joinUrl.searchParams.set("password", password);
+  return joinUrl.toString();
+}
+
 function participantIdentityForUser(userId) {
   return userId ? `user-${userId}` : null;
 }
@@ -185,7 +195,7 @@ async function createMeeting(hostId, payload, requestContext = {}) {
     meetingType: payload.meetingType || "group",
     e2eEncryptionEnabled: payload.e2eEncryptionEnabled,
     meetingId,
-    joinUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/join/${meetingId}`,
+    joinUrl: buildMeetingJoinUrl(meetingId, payload.password),
     liveKitRoomName: roomName,
     recurrence: payload.recurrence,
     personalRoom: payload.personalRoom || false,
@@ -281,11 +291,15 @@ async function updateMeeting(meetingId, userId, payload) {
   if (meeting.host.toString() !== userId.toString()) {
     throw new AuthorizationError("Only the host can update the meeting");
   }
+  const incomingPassword = Object.prototype.hasOwnProperty.call(payload, "password") ? payload.password : undefined;
   if (payload.password) {
     payload.passwordHash = await bcrypt.hash(payload.password, 10);
     delete payload.password;
   }
   Object.assign(meeting, payload, { updatedAt: new Date() });
+  if (incomingPassword !== undefined) {
+    meeting.joinUrl = buildMeetingJoinUrl(meeting.meetingId, incomingPassword || null);
+  }
   await meeting.save();
   if (payload.invitedParticipants?.length) {
     const invitedParticipants = await resolveInvitedParticipants(payload.invitedParticipants);
@@ -397,29 +411,38 @@ async function generateParticipantToken({ meetingId, userId, guestName, guestEma
     }
   }
   const identity = userId ? `user-${userId}` : `guest-${uid.rnd()}`;
+  const user = userId ? await User.findById(userId).select("displayName email") : null;
+  const participantName = user?.displayName || guestName || guestEmail || user?.email || identity;
+  const participantEmail = guestEmail || user?.email || undefined;
   if (meeting.waitingRoomEnabled && userId?.toString() !== meeting.host.toString()) {
-    await getRedis().zadd(`waiting-room:${meeting._id}`, Date.now(), JSON.stringify({ identity, userId, guestName }));
+    await getRedis().zadd(`waiting-room:${meeting._id}`, Date.now(), JSON.stringify({ identity, userId, guestName: participantName, email: participantEmail }));
     await broadcastMeetingEvent(meeting, {
       type: "waiting-room.entered",
-      participantName: guestName || identity,
+      participantName,
       participantIdentity: identity
     }, { destinationIdentities: getHostDestination(meeting) });
   }
   const token = await buildLiveKitToken({
     identity,
-    name: guestName || identity,
+    name: participantName,
     roomName: meeting.liveKitRoomName,
     canPublish: true,
     canSubscribe: true,
     canPublishData: true
   });
-  await MeetingParticipant.create({
-    meeting: meeting._id,
-    user: userId,
-    email: guestEmail,
-    guestName,
-    role: userId?.toString() === meeting.host.toString() ? "host" : guestName ? "guest" : "participant"
-  });
+  const role = userId?.toString() === meeting.host.toString() ? "host" : userId ? "participant" : "guest";
+  const participantFilter = userId ? { meeting: meeting._id, user: userId } : { meeting: meeting._id, email: participantEmail || guestEmail || `${identity}@guest.local` };
+  await MeetingParticipant.findOneAndUpdate(
+    participantFilter,
+    {
+      meeting: meeting._id,
+      user: userId,
+      email: participantEmail,
+      guestName: role === "guest" ? participantName : undefined,
+      role
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
   return { token, meeting };
 }
 

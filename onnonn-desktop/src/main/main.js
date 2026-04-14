@@ -223,7 +223,14 @@ function createMeetingWindow(payload) {
       expectedPath: packagedRendererIndexPath
     });
   });
-  loadWindow(meetingWindow, `/meeting-room?meetingId=${encodeURIComponent(payload.meetingId || "")}&title=${encodeURIComponent(payload.title || "Meeting")}`);
+  const meetingRoute = new URLSearchParams({
+    meetingId: payload.meetingId || "",
+    title: payload.title || "Meeting"
+  });
+  if (payload.password) {
+    meetingRoute.set("password", payload.password);
+  }
+  loadWindow(meetingWindow, `/meeting-room?${meetingRoute.toString()}`);
   meetingWindow.on("close", () => {
     if (canUseWindow(meetingWindow)) {
       setWindowState("meeting", meetingWindow.getBounds());

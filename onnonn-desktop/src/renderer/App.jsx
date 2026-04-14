@@ -132,7 +132,8 @@ function RouteEvents() {
         if (parsed.host === "meeting" && parsed.pathname.includes("/join")) {
           const payload = {
             meetingId: parsed.searchParams.get("meetingId"),
-            title: parsed.searchParams.get("title") || "Meeting"
+            title: parsed.searchParams.get("title") || "Meeting",
+            password: parsed.searchParams.get("password") || ""
           };
           if (!payload.meetingId) {
             throw new Error("Meeting ID was missing from the desktop link.");
