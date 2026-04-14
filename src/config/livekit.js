@@ -1,8 +1,22 @@
 const { AccessToken, RoomServiceClient, EgressClient, WebhookReceiver } = require("livekit-server-sdk");
 const env = require("./env");
 
-const roomService = env.livekitUrl ? new RoomServiceClient(env.livekitUrl, env.livekitApiKey, env.livekitApiSecret) : null;
-const egressClient = env.livekitUrl ? new EgressClient(env.livekitUrl, env.livekitApiKey, env.livekitApiSecret) : null;
+function normalizeServerSdkUrl(url) {
+  if (!url) {
+    return "";
+  }
+  if (url.startsWith("wss://")) {
+    return `https://${url.slice(6)}`;
+  }
+  if (url.startsWith("ws://")) {
+    return `http://${url.slice(5)}`;
+  }
+  return url;
+}
+
+const livekitServerUrl = normalizeServerSdkUrl(env.livekitUrl);
+const roomService = livekitServerUrl ? new RoomServiceClient(livekitServerUrl, env.livekitApiKey, env.livekitApiSecret) : null;
+const egressClient = livekitServerUrl ? new EgressClient(livekitServerUrl, env.livekitApiKey, env.livekitApiSecret) : null;
 const livekitWebhookReceiver = env.livekitWebhookSecret ? new WebhookReceiver(env.livekitWebhookSecret) : null;
 
 async function buildLiveKitToken({ identity, name, roomName, canPublish = true, canSubscribe = true, canPublishData = true }) {
@@ -11,4 +25,4 @@ async function buildLiveKitToken({ identity, name, roomName, canPublish = true, 
   return await token.toJwt();
 }
 
-module.exports = { roomService, egressClient, livekitWebhookReceiver, buildLiveKitToken };
+module.exports = { roomService, egressClient, livekitWebhookReceiver, buildLiveKitToken, livekitServerUrl };

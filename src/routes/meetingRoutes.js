@@ -3,7 +3,7 @@ const multer = require("multer");
 const controller = require("../controllers/meetingController");
 const { authMiddleware, optionalAuthMiddleware } = require("../middlewares/auth");
 const { validate } = require("../middlewares/validate");
-const { createMeetingSchema } = require("../validators/meetingValidators");
+const { createMeetingSchema, respondPollSchema } = require("../validators/meetingValidators");
 
 const allowedChatMimeTypes = new Set([
   "image/jpeg",
@@ -61,7 +61,7 @@ router.post("/:meetingId/reactions", authMiddleware, controller.react);
 router.post("/:meetingId/breakouts", authMiddleware, controller.createBreakouts);
 router.post("/:meetingId/breakouts/close", authMiddleware, controller.closeBreakouts);
 router.post("/:meetingId/polls", authMiddleware, controller.createPoll);
-router.post("/polls/:pollId/responses", authMiddleware, controller.respondPoll);
+router.post("/polls/:pollId/responses", authMiddleware, validate(respondPollSchema), controller.respondPoll);
 router.get("/polls/:pollId/results", authMiddleware, controller.pollResults);
 router.post("/polls/:pollId/end", authMiddleware, controller.endPoll);
 router.post("/:meetingId/questions", optionalAuthMiddleware, controller.createQuestion);

@@ -3,7 +3,7 @@ const { Recording, Meeting, Subscription } = require("../models");
 const { startRecording, stopRecording } = require("./livekitService");
 const { randomToken } = require("../utils/crypto");
 const { uploadBufferToProvider } = require("./storageService");
-const { NotFoundError, PlanLimitError, AuthorizationError } = require("../utils/errors");
+const { NotFoundError, PlanLimitError, AuthorizationError, LiveKitError } = require("../utils/errors");
 const { getPagination } = require("../utils/pagination");
 
 async function startMeetingRecording(meetingId, userId) {
@@ -24,7 +24,19 @@ async function startMeetingRecording(meetingId, userId) {
       usedBytes: subscription.storageUsedBytes
     });
   }
-  const egress = await startRecording(meeting.liveKitRoomName, `recordings/${meetingId}-${Date.now()}.mp4`);
+  let egress;
+  try {
+    egress = await startRecording(meeting.liveKitRoomName, `recordings/${meetingId}-${Date.now()}.mp4`);
+  } catch (error) {
+    const lowerMessage = String(error.message || "").toLowerCase();
+    const unavailableMessage = lowerMessage.includes("twirp") || lowerMessage.includes("no response from servers") || lowerMessage.includes("network");
+    throw new LiveKitError(
+      unavailableMessage
+        ? "Recording is currently unavailable because the LiveKit egress service is not reachable. Please ask the operator to configure and start the separate LiveKit Egress service on the VPS for live.niveel.com."
+        : "Recording is currently unavailable. Please try again shortly or ask the operator to verify the LiveKit Egress service configuration.",
+      { originalError: error.message }
+    );
+  }
   return Recording.create({
     meeting: meeting._id,
     host: userId,

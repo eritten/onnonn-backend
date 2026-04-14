@@ -29,4 +29,20 @@ const createMeetingSchema = z.object({
   params: z.object({}).optional()
 });
 
-module.exports = { createMeetingSchema };
+const respondPollSchema = z.object({
+  body: z.object({
+    participantId: z.string().optional(),
+    guestName: z.string().optional(),
+    selectedOption: z.union([z.number().int().nonnegative(), z.string().min(1)]).optional(),
+    optionIndex: z.number().int().nonnegative().optional(),
+    optionValue: z.string().min(1).optional()
+  }).refine((value) => value.selectedOption !== undefined || value.optionIndex !== undefined || value.optionValue !== undefined, {
+    message: "A poll response must include selectedOption, optionIndex, or optionValue"
+  }),
+  query: z.object({}).optional(),
+  params: z.object({
+    pollId: z.string().min(1)
+  })
+});
+
+module.exports = { createMeetingSchema, respondPollSchema };

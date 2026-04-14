@@ -70,7 +70,16 @@ const pollResponseSchema = new Schema({
   poll: { type: Schema.Types.ObjectId, ref: "Poll", required: true, index: true },
   participant: { type: Schema.Types.ObjectId, ref: "MeetingParticipant" },
   guestName: String,
-  selectedOption: { type: Number, required: true },
+  selectedOption: {
+    type: Schema.Types.Mixed,
+    required: true,
+    validate: {
+      validator(value) {
+        return (Number.isInteger(value) && value >= 0) || (typeof value === "string" && value.trim().length > 0);
+      },
+      message: "selectedOption must be a non-negative option index or a non-empty option value"
+    }
+  },
   ...auditFields
 });
 

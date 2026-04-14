@@ -525,10 +525,23 @@ async function createPoll(meetingId, userId, payload) {
 }
 
 async function respondToPoll(pollId, payload) {
-  const response = await PollResponse.create(payload.participantId
-    ? { poll: pollId, participant: payload.participantId, selectedOption: payload.selectedOption }
-    : { poll: pollId, guestName: payload.guestName, selectedOption: payload.selectedOption });
   const poll = await Poll.findById(pollId).populate("meeting");
+  if (!poll) {
+    throw new NotFoundError("Poll not found");
+  }
+
+  let selectedOption = payload.selectedOption;
+  if (selectedOption === undefined || selectedOption === null) {
+    selectedOption = payload.optionIndex;
+  }
+  if ((selectedOption === undefined || selectedOption === null) && payload.optionValue !== undefined) {
+    selectedOption = payload.optionValue;
+  }
+
+  const responsePayload = payload.participantId
+    ? { poll: pollId, participant: payload.participantId, selectedOption }
+    : { poll: pollId, guestName: payload.guestName, selectedOption };
+  const response = await PollResponse.create(responsePayload);
   await broadcastMeetingEvent(poll.meeting, {
     type: "poll.results.updated",
     ...(await computePollResultsForBroadcast(pollId))
@@ -541,7 +554,7 @@ async function getPollResults(pollId) {
   const responses = await PollResponse.find({ poll: pollId });
   const totals = poll.options.map((option, index) => ({
     option,
-    count: responses.filter((response) => response.selectedOption === index).length
+    count: responses.filter((response) => response.selectedOption === index || response.selectedOption === option).length
   }));
   return { poll, totals, totalResponses: responses.length };
 }
