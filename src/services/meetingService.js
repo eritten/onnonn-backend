@@ -265,7 +265,8 @@ async function listMeetings(userId, query) {
 }
 
 async function getMeetingByMeetingId(meetingId) {
-  const meeting = await findMeetingByIdentifier(meetingId).populate("host coHostIds template");
+  const meetingRecord = await findMeetingByIdentifier(meetingId);
+  const meeting = meetingRecord ? await meetingRecord.populate("host coHostIds template") : null;
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
