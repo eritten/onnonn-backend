@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, VideoConference, useRoomContext } from "@livekit/components-react";
 import { LocalVideoTrack, ParticipantEvent, RoomEvent, Track } from "livekit-client";
 import { formatDistanceStrict } from "date-fns";
@@ -57,11 +57,14 @@ function publishMeetingData(room, payload, options = {}) {
   }).catch(() => {});
 }
 
-function ControlButton({ active, icon: Icon, label, onClick, danger = false }) {
+function ControlButton({ active, icon: Icon, label, onClick, danger = false, shortcut }) {
   return (
     <button
       className={`${danger ? "bg-brand-error text-white" : active ? "bg-brand-accent text-white" : "bg-brand-900 text-brand-text"} inline-flex min-w-[96px] flex-col items-center justify-center gap-2 rounded-2xl border border-brand-800 px-4 py-3 text-xs font-medium transition hover:brightness-110`}
       onClick={onClick}
+      title={shortcut ? `${label} (${shortcut})` : label}
+      aria-label={shortcut ? `${label}. Shortcut ${shortcut}.` : label}
+      aria-keyshortcuts={shortcut || undefined}
     >
       <Icon size={18} />
       <span>{label}</span>
@@ -177,7 +180,7 @@ function ChatPanel({ meeting, room, currentUser, liveParticipants }) {
             </div>
             {message.content ? <p className="mt-2 text-sm text-brand-muted">{message.content}</p> : null}
             {message.fileUrl ? (
-              <button className="mt-3 text-sm text-brand-accent" onClick={() => window.open(message.fileUrl, "_blank")}>
+              <button className="mt-3 text-sm text-brand-accent" onClick={() => window.electronAPI.openExternal(message.fileUrl)}>
                 {message.originalFilename || "Open file"}
               </button>
             ) : null}
@@ -299,11 +302,68 @@ function PollsPanel({ meeting }) {
 
 function WhiteboardPanel({ meeting }) {
   const canvasRef = useRef(null);
+  const canvasContainerRef = useRef(null);
   const [color, setColor] = useState("#6366F1");
   const [brushSize, setBrushSize] = useState(4);
   const [isDrawing, setIsDrawing] = useState(false);
   const [eraser, setEraser] = useState(false);
   const lastSyncedState = useRef("");
+
+  const resizeCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const container = canvasContainerRef.current;
+    if (!canvas || !container) {
+      return;
+    }
+
+    const ratio = window.devicePixelRatio || 1;
+    const { width, height } = container.getBoundingClientRect();
+    const nextWidth = Math.max(Math.floor(width), 1);
+    const nextHeight = Math.max(Math.floor(height), 1);
+    const snapshot = canvas.toDataURL("image/png");
+
+    canvas.width = nextWidth * ratio;
+    canvas.height = nextHeight * ratio;
+    canvas.style.width = `${nextWidth}px`;
+    canvas.style.height = `${nextHeight}px`;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.scale(ratio, ratio);
+
+    if (snapshot && snapshot !== "data:,") {
+      const image = new Image();
+      image.onload = () => {
+        context.clearRect(0, 0, nextWidth, nextHeight);
+        context.drawImage(image, 0, 0, nextWidth, nextHeight);
+      };
+      image.src = snapshot;
+    }
+  }, []);
+
+  const getCanvasPoint = useCallback((event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    return {
+      x: (event.clientX - rect.left) * ratio / ratio,
+      y: (event.clientY - rect.top) * ratio / ratio
+    };
+  }, []);
+
+  useEffect(() => {
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    return () => window.removeEventListener("resize", resizeCanvas);
+  }, [resizeCanvas]);
 
   useEffect(() => {
     const syncFromServer = async () => {
@@ -344,14 +404,18 @@ function WhiteboardPanel({ meeting }) {
   function beginDrawing(event) {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
+    const point = getCanvasPoint(event.nativeEvent);
     if (!canvas || !context) {
+      return;
+    }
+    if (!point) {
       return;
     }
     context.strokeStyle = eraser ? "#FFFFFF" : color;
     context.lineWidth = brushSize;
     context.lineCap = "round";
     context.beginPath();
-    context.moveTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    context.moveTo(point.x, point.y);
     setIsDrawing(true);
   }
 
@@ -360,10 +424,14 @@ function WhiteboardPanel({ meeting }) {
       return;
     }
     const context = canvasRef.current?.getContext("2d");
+    const point = getCanvasPoint(event.nativeEvent);
     if (!context) {
       return;
     }
-    context.lineTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    if (!point) {
+      return;
+    }
+    context.lineTo(point.x, point.y);
     context.stroke();
   }
 
@@ -409,11 +477,9 @@ function WhiteboardPanel({ meeting }) {
           Sync
         </button>
       </div>
-      <div className="flex-1 p-4">
+      <div ref={canvasContainerRef} className="flex-1 p-4">
         <canvas
           ref={canvasRef}
-          width={960}
-          height={640}
           className="h-full w-full rounded-2xl border border-brand-800 bg-white"
           onMouseDown={beginDrawing}
           onMouseMove={draw}
@@ -492,6 +558,110 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
     const hostId = typeof meeting.host === "object" ? meeting.host?._id : meeting.host;
     return Boolean(currentUser?._id && hostId && String(currentUser._id) === String(hostId));
   }, [currentUser?._id, meeting.host]);
+
+  const toggleMic = useCallback(async () => {
+    await room.localParticipant.setMicrophoneEnabled(muted);
+    setMuted((current) => !current);
+  }, [muted, room.localParticipant]);
+
+  const toggleCamera = useCallback(async () => {
+    await room.localParticipant.setCameraEnabled(cameraOff);
+    setCameraOff((current) => !current);
+  }, [cameraOff, room.localParticipant]);
+
+  const beginScreenShare = useCallback(async (sourceId, sourceName) => {
+    try {
+      await window.electronAPI.selectScreenShareSource(sourceId);
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false
+      });
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        return;
+      }
+      const localTrack = new LocalVideoTrack(track);
+      track.addEventListener("ended", () => {
+        room.localParticipant.unpublishTrack(localTrack, true);
+      });
+      await room.localParticipant.publishTrack(localTrack, { source: Track.Source.ScreenShare });
+      setScreenPickerOpen(false);
+      toast.success(`Sharing ${sourceName}`);
+    } catch (error) {
+      console.error("Screen sharing failed", error);
+      toast.error("Could not start screen sharing.");
+    }
+  }, [room.localParticipant]);
+
+  const shareScreen = useCallback(async () => {
+    const sources = await window.electronAPI.listDesktopSources();
+    if (!sources.length) {
+      toast.error("No screen source was available.");
+      return;
+    }
+    setScreenSources(sources);
+    setScreenPickerOpen(true);
+  }, []);
+
+  const toggleHand = useCallback(async () => {
+    if (handRaised) {
+      await meetingService.lowerHand(meeting.meetingId);
+    } else {
+      await meetingService.raiseHand(meeting.meetingId);
+    }
+    setHandRaised((current) => !current);
+  }, [handRaised, meeting.meetingId]);
+
+  const sendReaction = useCallback(async (reaction) => {
+    if (reaction.emoji === "\u270B") {
+      await toggleHand();
+      return;
+    }
+    await meetingService.react(meeting.meetingId, { emoji: reaction.emoji });
+    await publishMeetingData(room, {
+      type: "reaction",
+      emoji: reaction.emoji,
+      senderName: currentUser?.displayName || room.localParticipant?.name || "You",
+      timestamp: new Date().toISOString()
+    });
+    const id = `${reaction.emoji}-${Date.now()}`;
+    setFloatingReactions((current) => [...current, { id, emoji: reaction.emoji, senderName: currentUser?.displayName || "You" }]);
+    window.setTimeout(() => {
+      setFloatingReactions((current) => current.filter((item) => item.id !== id));
+    }, 3000);
+  }, [currentUser?.displayName, meeting.meetingId, room, toggleHand]);
+
+  const toggleRecording = useCallback(async () => {
+    if (recording?._id) {
+      await recordingService.stop(recording._id);
+      setRecording(null);
+      toast.success("Recording stopped.");
+      return;
+    }
+    const nextRecording = await recordingService.start(meeting.meetingId);
+    setRecording(nextRecording);
+    toast.success("Recording started.");
+  }, [meeting.meetingId, recording?._id]);
+
+  const leaveRoom = useCallback(async () => {
+    await room.disconnect();
+    await window.electronAPI.closeMeetingWindow();
+    await window.electronAPI.focusMainWindow();
+  }, [room]);
+
+  const endMeeting = useCallback(async () => {
+    await meetingService.end(meeting.meetingId);
+    toast.success("Meeting ended for all participants.");
+    await leaveRoom();
+  }, [leaveRoom, meeting.meetingId]);
+
+  const muteParticipant = useCallback(async (participant) => {
+    await meetingService.muteParticipant(meeting.meetingId, participant.identity, undefined, true);
+  }, [meeting.meetingId]);
+
+  const removeParticipant = useCallback(async (participant) => {
+    await meetingService.removeParticipant(meeting.meetingId, participant.identity);
+  }, [meeting.meetingId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -603,111 +773,7 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [announce, handRaised, panel, recording, setPanel]);
-
-  async function toggleMic() {
-    await room.localParticipant.setMicrophoneEnabled(muted);
-    setMuted((current) => !current);
-  }
-
-  async function toggleCamera() {
-    await room.localParticipant.setCameraEnabled(cameraOff);
-    setCameraOff((current) => !current);
-  }
-
-  async function beginScreenShare(sourceId, sourceName) {
-    try {
-      await window.electronAPI.selectScreenShareSource(sourceId);
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false
-      });
-      const track = stream.getVideoTracks()[0];
-      if (!track) {
-        return;
-      }
-      const localTrack = new LocalVideoTrack(track);
-      track.addEventListener("ended", () => {
-        room.localParticipant.unpublishTrack(localTrack, true);
-      });
-      await room.localParticipant.publishTrack(localTrack, { source: Track.Source.ScreenShare });
-      setScreenPickerOpen(false);
-      toast.success(`Sharing ${sourceName}`);
-    } catch (error) {
-      console.error("Screen sharing failed", error);
-      toast.error("Could not start screen sharing.");
-    }
-  }
-
-  async function shareScreen() {
-    const sources = await window.electronAPI.listDesktopSources();
-    if (!sources.length) {
-      toast.error("No screen source was available.");
-      return;
-    }
-    setScreenSources(sources);
-    setScreenPickerOpen(true);
-  }
-
-  async function toggleHand() {
-    if (handRaised) {
-      await meetingService.lowerHand(meeting.meetingId);
-    } else {
-      await meetingService.raiseHand(meeting.meetingId);
-    }
-    setHandRaised((current) => !current);
-  }
-
-  async function sendReaction(reaction) {
-    if (reaction.emoji === "\u270B") {
-      await toggleHand();
-      return;
-    }
-    await meetingService.react(meeting.meetingId, { emoji: reaction.emoji });
-    await publishMeetingData(room, {
-      type: "reaction",
-      emoji: reaction.emoji,
-      senderName: currentUser?.displayName || room.localParticipant?.name || "You",
-      timestamp: new Date().toISOString()
-    });
-    const id = `${reaction.emoji}-${Date.now()}`;
-    setFloatingReactions((current) => [...current, { id, emoji: reaction.emoji, senderName: currentUser?.displayName || "You" }]);
-    window.setTimeout(() => {
-      setFloatingReactions((current) => current.filter((item) => item.id !== id));
-    }, 3000);
-  }
-
-  async function toggleRecording() {
-    if (recording?._id) {
-      await recordingService.stop(recording._id);
-      setRecording(null);
-      toast.success("Recording stopped.");
-      return;
-    }
-    const nextRecording = await recordingService.start(meeting.meetingId);
-    setRecording(nextRecording);
-    toast.success("Recording started.");
-  }
-
-  async function leaveRoom() {
-    await room.disconnect();
-    await window.electronAPI.closeMeetingWindow();
-    await window.electronAPI.focusMainWindow();
-  }
-
-  async function endMeeting() {
-    await meetingService.end(meeting.meetingId);
-    toast.success("Meeting ended for all participants.");
-    await leaveRoom();
-  }
-
-  async function muteParticipant(participant) {
-    await meetingService.muteParticipant(meeting.meetingId, participant.identity, undefined, true);
-  }
-
-  async function removeParticipant(participant) {
-    await meetingService.removeParticipant(meeting.meetingId, participant.identity);
-  }
+  }, [announce, handRaised, panel, recording, setPanel, shareScreen, toggleCamera, toggleHand, toggleMic, toggleRecording]);
 
   return (
     <>
@@ -752,10 +818,10 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
 
         <footer className="border-t border-brand-800 bg-brand-950/95 px-6 py-4">
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <ControlButton active={!muted} icon={muted ? MicOff : Mic} label={muted ? "Unmute" : "Mute"} onClick={toggleMic} />
-            <ControlButton active={!cameraOff} icon={cameraOff ? CameraOff : Camera} label={cameraOff ? "Camera on" : "Camera off"} onClick={toggleCamera} />
-            <ControlButton active={false} icon={MonitorUp} label="Share" onClick={shareScreen} />
-            <ControlButton active={handRaised} icon={Hand} label={handRaised ? "Lower hand" : "Raise hand"} onClick={toggleHand} />
+            <ControlButton active={!muted} icon={muted ? MicOff : Mic} label={muted ? "Unmute" : "Mute"} onClick={toggleMic} shortcut="M" />
+            <ControlButton active={!cameraOff} icon={cameraOff ? CameraOff : Camera} label={cameraOff ? "Camera on" : "Camera off"} onClick={toggleCamera} shortcut="C" />
+            <ControlButton active={false} icon={MonitorUp} label="Share" onClick={shareScreen} shortcut="S" />
+            <ControlButton active={handRaised} icon={Hand} label={handRaised ? "Lower hand" : "Raise hand"} onClick={toggleHand} shortcut="H" />
             <div className="relative">
               <ControlButton active={panel === "reactions"} icon={Smile} label="Reactions" onClick={() => setPanel((current) => current === "reactions" ? null : "reactions")} />
               {panel === "reactions" ? <ReactionPicker onSelect={sendReaction} /> : null}
@@ -765,7 +831,7 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
             <ControlButton active={panel === "polls"} icon={Vote} label="Polls" onClick={() => setPanel(panel === "polls" ? null : "polls")} />
             <ControlButton active={panel === "whiteboard"} icon={ClipboardPenLine} label="Whiteboard" onClick={() => setPanel(panel === "whiteboard" ? null : "whiteboard")} />
             <ControlButton active={panel === "waiting"} icon={ShieldCheck} label="Waiting room" onClick={() => setPanel(panel === "waiting" ? null : "waiting")} />
-            <ControlButton active={Boolean(recording)} icon={CircleDot} label={recording ? "Stop rec" : "Record"} onClick={toggleRecording} />
+            <ControlButton active={Boolean(recording)} icon={CircleDot} label={recording ? "Stop rec" : "Record"} onClick={toggleRecording} shortcut="R" />
             <ControlButton danger icon={PhoneOff} label="Leave" onClick={leaveRoom} />
             <ControlButton danger icon={PhoneOff} label="End" onClick={endMeeting} />
           </div>
@@ -834,7 +900,10 @@ export function MeetingRoomPage() {
     };
 
     hydrate();
-    window.electronAPI.onMeetingJoin(hydrate);
+    const offMeetingJoin = window.electronAPI.onMeetingJoin(hydrate);
+    return () => {
+      offMeetingJoin?.();
+    };
   }, [meetingId, user?.displayName, user?.email]);
 
   async function joinMeeting() {

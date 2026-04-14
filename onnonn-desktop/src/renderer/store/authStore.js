@@ -94,6 +94,17 @@ export const useAuthStore = create((set, get) => ({
     get().scheduleRefresh();
     return session;
   },
+  async applySessionRefresh(payload) {
+    const nextSession = buildSessionEnvelope({
+      ...(get().session || {}),
+      ...payload,
+      user: payload.user || get().user || get().session?.user || null
+    });
+    await window.electronAPI.setSession(nextSession);
+    set({ session: nextSession, user: nextSession.user, status: "authenticated" });
+    get().scheduleRefresh();
+    return nextSession;
+  },
   async refreshCurrentUser() {
     const session = get().session || await window.electronAPI.getSession();
     if (!session?.accessToken) {
@@ -157,6 +168,6 @@ export const useAuthStore = create((set, get) => ({
 
 registerAuthHandlers({
   sessionGetter: () => useAuthStore.getState().session,
-  refreshHandler: () => useAuthStore.getState().refreshTokens(),
+  sessionUpdatedHandler: (session) => useAuthStore.getState().applySessionRefresh(session),
   unauthorizedHandler: () => useAuthStore.getState().clearSession()
 });

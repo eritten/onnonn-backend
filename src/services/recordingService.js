@@ -12,10 +12,17 @@ async function startMeetingRecording(meetingId, userId) {
     throw new NotFoundError("Meeting not found");
   }
   const subscription = await Subscription.findOne({ user: userId }).populate("plan");
-  const limitGb = subscription.plan.limits.cloudRecordingStorageGb;
-  const limitBytes = limitGb === 0 ? 0 : limitGb * 1024 * 1024 * 1024;
-  if (limitGb === 0 || (limitBytes && subscription.storageUsedBytes >= limitBytes)) {
-    throw new PlanLimitError("Recording storage quota exceeded", { limitBytes, usedBytes: subscription.storageUsedBytes });
+  const recordingEnabled = Boolean(subscription?.plan?.limits?.flags?.cloudRecording);
+  const limitGb = Number(subscription?.plan?.limits?.cloudRecordingStorageGb || 0);
+  const limitBytes = limitGb > 0 ? limitGb * 1024 * 1024 * 1024 : 0;
+  if (!recordingEnabled) {
+    throw new PlanLimitError("Cloud recording is not available on your current plan.", { limitBytes, usedBytes: subscription?.storageUsedBytes || 0 });
+  }
+  if (limitBytes > 0 && subscription.storageUsedBytes >= limitBytes) {
+    throw new PlanLimitError("Your recording storage is full. Upgrade your plan or delete older recordings to continue.", {
+      limitBytes,
+      usedBytes: subscription.storageUsedBytes
+    });
   }
   const egress = await startRecording(meeting.liveKitRoomName, `recordings/${meetingId}-${Date.now()}.mp4`);
   return Recording.create({

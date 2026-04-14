@@ -10,9 +10,9 @@ const defaultPlans = [
     limits: {
       maxMeetingDurationMinutes: 40,
       maxParticipantsPerMeeting: 100,
-      cloudRecordingStorageGb: 0,
+      cloudRecordingStorageGb: 2,
       flags: {
-        cloudRecording: false,
+        cloudRecording: true,
         aiTranscription: false,
         aiSummary: false,
         smartNotes: false,
@@ -67,6 +67,21 @@ async function ensureDefaultPlans() {
   for (const plan of defaultPlans) {
     await Plan.findOneAndUpdate({ slug: plan.slug }, plan, { upsert: true, new: true });
   }
+
+  await Plan.updateOne(
+    { slug: "free" },
+    {
+      $set: {
+        name: "Free",
+        price: 0,
+        stripePriceId: env.stripeFreePlanPriceId,
+        "limits.maxMeetingDurationMinutes": 40,
+        "limits.maxParticipantsPerMeeting": 100,
+        "limits.cloudRecordingStorageGb": 2,
+        "limits.flags.cloudRecording": true
+      }
+    }
+  );
 }
 
 async function getFreePlan() {

@@ -162,9 +162,14 @@ async function createSession(user, { userAgent, ipAddress }) {
   const rawRefreshToken = signRefreshToken({ sub: user._id.toString() });
   const refreshTokenHash = hashToken(rawRefreshToken);
   const redis = getRedis();
+  const sessionFilter = userAgent
+    ? { user: user._id, userAgent }
+    : ipAddress
+      ? { user: user._id, ipAddress }
+      : null;
 
-  if (userAgent) {
-    const existingSessions = await Session.find({ user: user._id, userAgent }).select("_id");
+  if (sessionFilter) {
+    const existingSessions = await Session.find(sessionFilter).select("_id");
     if (existingSessions.length) {
       await Session.deleteMany({ _id: { $in: existingSessions.map((session) => session._id) } });
       for (const existingSession of existingSessions) {
@@ -172,6 +177,8 @@ async function createSession(user, { userAgent, ipAddress }) {
       }
     }
   }
+
+  await Session.deleteMany({ refreshTokenHash });
 
   const session = await Session.create({
     user: user._id,

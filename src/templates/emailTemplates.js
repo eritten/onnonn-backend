@@ -1,4 +1,4 @@
-const { renderBaseEmail, escapeHtml } = require("./emailBase");
+﻿const { renderBaseEmail, escapeHtml } = require("./emailBase");
 
 function paragraph(text) {
   return `<p style="margin: 0 0 16px;">${escapeHtml(text)}</p>`;
@@ -22,7 +22,7 @@ const templates = {
     subject: "Your Onnonn account is ready",
     text: `Hello ${name}, your email is verified and your Onnonn account is ready.`,
     html: renderBaseEmail({
-      heading: "You’re all set",
+      heading: "Youâ€™re all set",
       intro: `Hello ${name}, your email has been verified.`,
       bodyHtml: `${paragraph("Your Onnonn workspace is now ready. You can schedule meetings, invite teammates, and start collaborating right away.")}`,
       buttonLabel: "Open Onnonn",
@@ -49,13 +49,13 @@ const templates = {
       buttonUrl: appUrl
     })
   }),
-  meetingInvitation: ({ recipientName, title, joinUrl, scheduledTime }) => ({
+  meetingInvitation: ({ recipientName, title, joinUrl, scheduledTime, meetingId }) => ({
     subject: `Invitation: ${title}`,
-    text: `${recipientName}, you are invited to ${title}${scheduledTime ? ` on ${scheduledTime}` : ""}. Join: ${joinUrl}`,
+    text: `${recipientName}, you are invited to ${title}${scheduledTime ? ` on ${scheduledTime}` : ""}. Meeting ID: ${meetingId || "N/A"}. Join: ${joinUrl}`,
     html: renderBaseEmail({
       heading: "Meeting invitation",
-      intro: `Hello ${recipientName}, you’ve been invited to a meeting on Onnonn.`,
-      bodyHtml: `${paragraph(`Meeting: ${title}`)}${scheduledTime ? paragraph(`Scheduled for: ${scheduledTime}`) : paragraph("This meeting is available to join instantly.")}`,
+      intro: `Hello ${recipientName}, youâ€™ve been invited to a meeting on Onnonn.`,
+      bodyHtml: `${paragraph(`Meeting: ${title}`)}${meetingId ? paragraph(`Meeting ID: ${meetingId}`) : ""}${scheduledTime ? paragraph(`Scheduled for: ${scheduledTime}`) : paragraph("This meeting is available to join instantly.")}`,
       buttonLabel: "Join meeting",
       buttonUrl: joinUrl
     })
@@ -65,7 +65,7 @@ const templates = {
     text: `${recipientName}, your meeting "${title}" was updated. ${summary} Join: ${joinUrl}`,
     html: renderBaseEmail({
       heading: "Meeting updated",
-      intro: `Hello ${recipientName}, there’s an update to your Onnonn meeting.`,
+      intro: `Hello ${recipientName}, thereâ€™s an update to your Onnonn meeting.`,
       bodyHtml: `${paragraph(`Meeting: ${title}`)}${paragraph(summary)}`,
       buttonLabel: "View meeting",
       buttonUrl: joinUrl
@@ -103,12 +103,12 @@ const templates = {
     })
   }),
   webinarRegistrationConfirmation: ({ recipientName, title, joinToken }) => ({
-    subject: `You’re registered for ${title}`,
-    text: `${recipientName}, you’re registered for ${title}. Your join token is ${joinToken}.`,
+    subject: `Youâ€™re registered for ${title}`,
+    text: `${recipientName}, youâ€™re registered for ${title}. Your join token is ${joinToken}.`,
     html: renderBaseEmail({
       heading: "Webinar registration confirmed",
       intro: `Hello ${recipientName}, your seat is confirmed.`,
-      bodyHtml: `${paragraph(`You’re registered for "${title}". Keep the join token below handy for entry.`)}${codeBlock(joinToken)}`
+      bodyHtml: `${paragraph(`Youâ€™re registered for "${title}". Keep the join token below handy for entry.`)}${codeBlock(joinToken)}`
     })
   }),
   webinarRecordingAvailable: ({ recipientName, title, recordingUrl }) => ({
@@ -127,7 +127,7 @@ const templates = {
     text: `${recipientName}, you were invited to join ${organizationName}. Invitation token: ${inviteToken}`,
     html: renderBaseEmail({
       heading: "Organization invitation",
-      intro: `Hello ${recipientName}, you’ve been invited to join ${organizationName} on Onnonn.`,
+      intro: `Hello ${recipientName}, youâ€™ve been invited to join ${organizationName} on Onnonn.`,
       bodyHtml: `${paragraph("Use the invitation token below to accept your invite.")}${codeBlock(inviteToken)}`
     })
   }),
@@ -147,7 +147,7 @@ const templates = {
     text: `${recipientName}, a recent payment for your Onnonn account failed. Update your payment method: ${appUrl}`,
     html: renderBaseEmail({
       heading: "Payment failed",
-      intro: `Hello ${recipientName}, we couldn’t process your latest payment.`,
+      intro: `Hello ${recipientName}, we couldnâ€™t process your latest payment.`,
       bodyHtml: `${paragraph("Please update your payment details to avoid any interruption to your subscription.")}`,
       buttonLabel: "Update payment method",
       buttonUrl: appUrl
@@ -180,7 +180,7 @@ const templates = {
     text: `${recipientName}, you were assigned: ${task}${deadline ? `, due ${deadline}` : ""}.`,
     html: renderBaseEmail({
       heading: "Action item assigned",
-      intro: `Hello ${recipientName}, you’ve been assigned a new action item.`,
+      intro: `Hello ${recipientName}, youâ€™ve been assigned a new action item.`,
       bodyHtml: `${paragraph(`Task: ${task}`)}${deadline ? paragraph(`Deadline: ${deadline}`) : ""}`,
       buttonLabel: "View action items",
       buttonUrl: appUrl
@@ -203,9 +203,10 @@ const templates = {
     html: renderBaseEmail({
       heading: "Deletion complete",
       intro: `Hello ${recipientName}, your data deletion request has been completed.`,
-      bodyHtml: `${paragraph("We’ve processed the deletion or anonymization of your personal data associated with Onnonn.")}`
+      bodyHtml: `${paragraph("Weâ€™ve processed the deletion or anonymization of your personal data associated with Onnonn.")}`
     })
   })
 };
 
 module.exports = { templates };
+

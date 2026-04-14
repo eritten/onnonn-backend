@@ -32,13 +32,13 @@ function AuthShell({ title, subtitle, children }) {
   );
 }
 
-function Field({ label, error, children }) {
+function Field({ id, label, error, children }) {
   return (
-    <label className="block space-y-2">
-      <span className="field-label">{label}</span>
+    <div className="block space-y-2">
+      <label className="field-label" htmlFor={id}>{label}</label>
       {children}
-      {error ? <p className="form-error">{error}</p> : null}
-    </label>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+    </div>
   );
 }
 
@@ -68,16 +68,16 @@ export function LoginPage() {
           setFormError(getErrorMessage(error));
         }
       })}>
-        <Field label="Email address" error={form.formState.errors.email?.message}>
-          <input className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
+        <Field id="login-email" label="Email address" error={form.formState.errors.email?.message}>
+          <input id="login-email" className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
         </Field>
-        <Field label="Password" error={form.formState.errors.password?.message}>
-          <input className="field" type="password" placeholder="Enter your password" autoComplete="current-password" {...form.register("password")} />
+        <Field id="login-password" label="Password" error={form.formState.errors.password?.message}>
+          <input id="login-password" className="field" type="password" placeholder="Enter your password" autoComplete="current-password" {...form.register("password")} />
         </Field>
-        {formError ? <p className="form-error">{formError}</p> : null}
-        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full">Sign in</LoadingButton>
+        {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full" aria-label="Sign in">Sign in</LoadingButton>
       </form>
-      <button className="btn-secondary mt-4 w-full" disabled={loadingGoogle} onClick={async () => {
+      <button className="btn-secondary mt-4 w-full" disabled={loadingGoogle} aria-label="Sign in with Google" onClick={async () => {
         setLoadingGoogle(true);
         try {
           const url = await authService.getGoogleUrl();
@@ -118,17 +118,17 @@ export function RegisterPage() {
           setFormError(getErrorMessage(error));
         }
       })}>
-        <Field label="Display name" error={form.formState.errors.displayName?.message}>
-          <input className="field" placeholder="Jane Doe" autoComplete="name" {...form.register("displayName")} />
+        <Field id="register-display-name" label="Display name" error={form.formState.errors.displayName?.message}>
+          <input id="register-display-name" className="field" placeholder="Jane Doe" autoComplete="name" {...form.register("displayName")} />
         </Field>
-        <Field label="Email address" error={form.formState.errors.email?.message}>
-          <input className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
+        <Field id="register-email" label="Email address" error={form.formState.errors.email?.message}>
+          <input id="register-email" className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
         </Field>
-        <Field label="Password" error={form.formState.errors.password?.message}>
-          <input className="field" type="password" placeholder="Choose a strong password" autoComplete="new-password" {...form.register("password")} />
+        <Field id="register-password" label="Password" error={form.formState.errors.password?.message}>
+          <input id="register-password" className="field" type="password" placeholder="Choose a strong password" autoComplete="new-password" {...form.register("password")} />
         </Field>
-        {formError ? <p className="form-error">{formError}</p> : null}
-        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full">Register</LoadingButton>
+        {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full" aria-label="Create account">Register</LoadingButton>
       </form>
       <p className="mt-6 text-sm text-brand-muted">Already registered? <Link to="/login" className="text-brand-accent">Sign in</Link></p>
     </AuthShell>
@@ -156,8 +156,8 @@ export function VerifyEmailPage() {
     <AuthShell title="Verify email" subtitle={`Enter the 6-digit code sent to ${email || "your inbox"}.`}>
       <div className="space-y-6">
         <OTPInput value={code} onChange={setCode} />
-        {formError ? <p className="form-error">{formError}</p> : null}
-        <LoadingButton className="btn-primary w-full" onClick={async () => {
+        {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+        <LoadingButton className="btn-primary w-full" aria-label="Verify email code" onClick={async () => {
           setFormError("");
           try {
             const user = await authService.verifyEmail({ email, code });
@@ -168,7 +168,7 @@ export function VerifyEmailPage() {
             setFormError(getErrorMessage(error));
           }
         }}>Verify</LoadingButton>
-        <button className="btn-secondary w-full" disabled={cooldown > 0} onClick={async () => {
+        <button className="btn-secondary w-full" disabled={cooldown > 0} aria-label="Resend verification code" onClick={async () => {
           setFormError("");
           try {
             await authService.resendVerification(email);
@@ -212,21 +212,21 @@ export function ForgotPasswordPage() {
           setFormError(getErrorMessage(error));
         }
       })}>
-        <Field label="Email address" error={form.formState.errors.email?.message}>
-          <input className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
+        <Field id="forgot-email" label="Email address" error={form.formState.errors.email?.message}>
+          <input id="forgot-email" className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
         </Field>
         {sent && (
           <>
-            <Field label="Reset code">
-              <OTPInput value={code} onChange={setCode} />
+            <Field id="reset-code-0" label="Reset code">
+              <OTPInput idPrefix="reset-code" value={code} onChange={setCode} />
             </Field>
-            <Field label="New password" error={form.formState.errors.newPassword?.message}>
-              <input className="field" type="password" placeholder="Choose a new password" autoComplete="new-password" {...form.register("newPassword")} />
+            <Field id="forgot-new-password" label="New password" error={form.formState.errors.newPassword?.message}>
+              <input id="forgot-new-password" className="field" type="password" placeholder="Choose a new password" autoComplete="new-password" {...form.register("newPassword")} />
             </Field>
           </>
         )}
-        {formError ? <p className="form-error">{formError}</p> : null}
-        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full">{sent ? "Reset password" : "Send OTP"}</LoadingButton>
+        {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full" aria-label={sent ? "Reset password" : "Send reset code"}>{sent ? "Reset password" : "Send OTP"}</LoadingButton>
       </form>
       <p className="mt-6 text-sm text-brand-muted">Remembered it? <Link to="/login" className="text-brand-accent">Back to sign in</Link></p>
     </AuthShell>

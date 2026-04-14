@@ -66,6 +66,7 @@ async function queueMeetingEmails(template, meeting, recipients) {
         recipientName: recipient.name || recipient.email,
         title: meeting.title,
         description: meeting.description,
+        meetingId: meeting.meetingId,
         joinUrl: meeting.joinUrl,
         scheduledTime: meeting.scheduledStartTime ? new Date(meeting.scheduledStartTime).toISOString() : null
       }

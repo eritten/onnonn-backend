@@ -106,6 +106,7 @@ function RouteEvents() {
   const location = useLocation();
   const status = useAuthStore((state) => state.status);
   const setExternalSession = useAuthStore((state) => state.setExternalSession);
+  const applySessionRefresh = useAuthStore((state) => state.applySessionRefresh);
   const setPendingMeetingJoin = useUiStore((state) => state.setPendingMeetingJoin);
   const consumePendingMeetingJoin = useUiStore((state) => state.consumePendingMeetingJoin);
   const announce = useUiStore((state) => state.announce);
@@ -178,9 +179,22 @@ function RouteEvents() {
         handleProtocolUrl(url).catch(() => {});
       });
     }).catch(() => {});
-    window.electronAPI.onProtocolUrl(handleProtocolUrl);
-    window.electronAPI.onStartInstantMeeting(handleStartInstantMeeting);
-  }, [announce, navigate, setExternalSession, setPendingMeetingJoin, status]);
+    const offProtocolUrl = window.electronAPI.onProtocolUrl((url) => {
+      handleProtocolUrl(url).catch(() => {});
+    });
+    const offStartInstantMeeting = window.electronAPI.onStartInstantMeeting(handleStartInstantMeeting);
+    const offSessionRefreshed = window.electronAPI.onSessionRefreshed((sessionPayload) => {
+      applySessionRefresh(sessionPayload).catch((error) => {
+        console.error("Failed to apply refreshed desktop session", error);
+      });
+    });
+
+    return () => {
+      offProtocolUrl?.();
+      offStartInstantMeeting?.();
+      offSessionRefreshed?.();
+    };
+  }, [announce, applySessionRefresh, navigate, setExternalSession, setPendingMeetingJoin, status]);
 
   useEffect(() => {
     if (status === "authenticated" && ["/", "/login", "/register"].includes(location.pathname)) {
@@ -201,6 +215,11 @@ function RouteEvents() {
   }, [announce, consumePendingMeetingJoin, status]);
 
   return null;
+}
+
+function FallbackRoute() {
+  const status = useAuthStore((state) => state.status);
+  return <Navigate to={status === "authenticated" ? "/app/home" : "/login"} replace />;
 }
 
 export default function App() {
@@ -239,7 +258,7 @@ export default function App() {
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 
-          <Route path="*" element={<Navigate to={useAuthStore.getState().status === "authenticated" ? "/app/home" : "/login"} replace />} />
+          <Route path="*" element={<FallbackRoute />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

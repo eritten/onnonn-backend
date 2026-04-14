@@ -27,6 +27,7 @@ let meetingWindow;
 let tray;
 let pendingProtocolUrls = [];
 let preferredDisplaySourceId = null;
+let backgroundRefreshTimer = null;
 
 const isDev = !app.isPackaged;
 const appIconPath = path.join(__dirname, "../../public/icon.ico");
@@ -87,6 +88,10 @@ async function loadWindow(targetWindow, route = "/") {
 }
 
 function createMainWindow() {
+  return createMainWindowForRoute("/");
+}
+
+function createMainWindowForRoute(route = "/") {
   const bounds = getWindowState("main", { width: 1440, height: 920 });
   mainWindow = new BrowserWindow({
     ...bounds,
@@ -114,7 +119,7 @@ function createMainWindow() {
       expectedPath: packagedRendererIndexPath
     });
   });
-  loadWindow(mainWindow, "/");
+  loadWindow(mainWindow, route);
   mainWindow.on("close", () => {
     if (canUseWindow(mainWindow)) {
       setWindowState("main", mainWindow.getBounds());
@@ -126,10 +131,68 @@ function createMainWindow() {
   return mainWindow;
 }
 
+async function refreshStoredSessionInMain() {
+  const storedSession = getSession();
+  const refreshToken = storedSession?.refreshToken;
+  if (!refreshToken) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: apiOrigin,
+        Referer: `${apiOrigin}/`
+      },
+      body: JSON.stringify({ refreshToken })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Refresh request failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (!payload?.accessToken || !payload?.refreshToken) {
+      throw new Error("Refresh response did not include session tokens");
+    }
+
+    const nextSession = {
+      ...storedSession,
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      sessionId: payload.session?._id || storedSession?.sessionId
+    };
+    setSession(nextSession);
+    return nextSession;
+  } catch (error) {
+    console.error("Silent desktop session refresh failed", error);
+    clearSession();
+    return null;
+  }
+}
+
+function startBackgroundRefresh() {
+  if (backgroundRefreshTimer) {
+    clearInterval(backgroundRefreshTimer);
+  }
+
+  backgroundRefreshTimer = setInterval(() => {
+    refreshStoredSessionInMain().then((sessionPayload) => {
+      if (sessionPayload && canUseWindow(mainWindow)) {
+        sendToWindow(mainWindow, "session:refreshed", sessionPayload);
+      }
+    }).catch((error) => {
+      console.error("Background session refresh failed", error);
+    });
+  }, 10 * 60 * 1000);
+}
+
 function createMeetingWindow(payload) {
   if (meetingWindow && !meetingWindow.isDestroyed()) {
     meetingWindow.focus();
-    meetingWindow.webContents.send("meeting:join", payload);
+    sendToWindow(meetingWindow, "meeting:join", payload);
     return meetingWindow;
   }
 
@@ -346,9 +409,20 @@ app.whenReady().then(() => {
   configureApiRequestHeaders();
   configureDisplayMediaHandler();
   registerIpc();
-  createMainWindow();
-  setupTray();
   setupProtocolHandling();
+  refreshStoredSessionInMain()
+    .then((sessionPayload) => {
+      const initialRoute = sessionPayload?.accessToken ? "/app/home" : "/login";
+      createMainWindowForRoute(initialRoute);
+      startBackgroundRefresh();
+      setupTray();
+    })
+    .catch((error) => {
+      console.error("Desktop startup refresh bootstrap failed", error);
+      createMainWindowForRoute("/login");
+      startBackgroundRefresh();
+      setupTray();
+    });
   setupUpdater();
 });
 
@@ -359,6 +433,10 @@ app.on("activate", () => {
 });
 
 app.on("window-all-closed", () => {
+  if (backgroundRefreshTimer) {
+    clearInterval(backgroundRefreshTimer);
+    backgroundRefreshTimer = null;
+  }
   if (process.platform !== "darwin") {
     app.quit();
   }

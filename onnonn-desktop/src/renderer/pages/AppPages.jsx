@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
@@ -22,6 +22,82 @@ function Section({ title, children, actions }) {
       </div>
       {children}
     </section>
+  );
+}
+
+function Field({ id, label, children, hint }) {
+  return (
+    <div className="space-y-2">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      {children}
+      {hint ? <p className="text-xs text-brand-muted">{hint}</p> : null}
+    </div>
+  );
+}
+
+function parseInviteEmails(value) {
+  return [...new Set(
+    value
+      .split(/[\n,]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+function toInvitePayload(value) {
+  return parseInviteEmails(value).map((email) => ({ email }));
+}
+
+async function copyMeetingLink(url) {
+  await navigator.clipboard.writeText(url);
+  toast.success("Join link copied.");
+}
+
+function logActionError(label, error) {
+  console.error(`[Onnonn Desktop] ${label} failed`, error);
+}
+
+function removeInviteEmail(value, emailToRemove) {
+  return parseInviteEmails(value)
+    .filter((email) => email !== emailToRemove)
+    .join(", ");
+}
+
+function InviteEmailField({ id, label, value, onChange, onRemove, hint }) {
+  const emails = parseInviteEmails(value);
+
+  return (
+    <div className="space-y-3">
+      <Field id={id} label={label} hint={hint}>
+        <textarea
+          id={id}
+          className="field"
+          rows={3}
+          placeholder="person1@example.com, person2@example.com"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </Field>
+      {emails.length ? (
+        <ul className="flex flex-wrap gap-2" role="list" aria-label="Invited email addresses">
+          {emails.map((email) => (
+            <li key={email}>
+              <span className="inline-flex items-center gap-2 rounded-full border border-brand-700 bg-brand-950/80 px-3 py-2 text-sm text-brand-text">
+                <span>{email}</span>
+                <button
+                  type="button"
+                  className="text-brand-muted transition hover:text-white"
+                  aria-label={`Remove ${email}`}
+                  onClick={() => onRemove(email)}
+                >
+                  ×
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -98,7 +174,7 @@ export function DashboardPage() {
                   <p className="font-medium">{recording.fileUrl ? "Recording ready" : "Recording pending"}</p>
                   <p className="text-sm text-brand-muted">{recording.createdAt ? format(new Date(recording.createdAt), "PPp") : "Unknown date"}</p>
                 </div>
-                <button className="btn-secondary" onClick={() => window.open(recording.fileUrl, "_blank")}>Play</button>
+                <button className="btn-secondary" onClick={() => window.electronAPI.openExternal(recording.fileUrl)}>Play</button>
               </div>
             ))}
           </div>
@@ -116,6 +192,9 @@ export function MeetingsPage() {
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(Boolean(searchParams.get("new")));
   const [payload, setPayload] = useState({ title: "", description: "", scheduledStartTime: "", expectedDuration: 30, maxParticipants: 10, meetingType: "group", waitingRoomEnabled: false, muteOnEntry: false, allowSelfUnmute: true, autoRecord: false, e2eEncryptionEnabled: false, invitedParticipants: [] });
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [createdMeetingLink, setCreatedMeetingLink] = useState("");
+  const [createdMeetingId, setCreatedMeetingId] = useState("");
   const announce = useUiStore((state) => state.announce);
   const navigate = useNavigate();
 
@@ -179,22 +258,92 @@ export function MeetingsPage() {
         </div>
       ) : <EmptyState title="No meetings found" description="Create your first meeting or adjust the filters to see more results." />}
 
-      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setSearchParams({}); }} title="Create meeting">
+      <Modal open={modalOpen} onClose={() => {
+        setModalOpen(false);
+        setSearchParams({});
+        setCreatedMeetingLink("");
+        setCreatedMeetingId("");
+        setInviteEmails("");
+      }} title="Create meeting">
         <div className="grid gap-4 md:grid-cols-2">
-          <input className="field" placeholder="Title" value={payload.title} onChange={(event) => setPayload((current) => ({ ...current, title: event.target.value }))} />
-          <input className="field" type="datetime-local" value={payload.scheduledStartTime} onChange={(event) => setPayload((current) => ({ ...current, scheduledStartTime: event.target.value }))} />
-          <textarea className="field md:col-span-2" rows={3} placeholder="Description" value={payload.description} onChange={(event) => setPayload((current) => ({ ...current, description: event.target.value }))} />
-          <input className="field" type="number" placeholder="Expected duration" value={payload.expectedDuration} onChange={(event) => setPayload((current) => ({ ...current, expectedDuration: Number(event.target.value) }))} />
-          <input className="field" type="number" placeholder="Max participants" value={payload.maxParticipants} onChange={(event) => setPayload((current) => ({ ...current, maxParticipants: Number(event.target.value) }))} />
-          <select className="field" value={payload.meetingType} onChange={(event) => setPayload((current) => ({ ...current, meetingType: event.target.value }))}>
-            <option value="one-on-one">One-on-one</option>
-            <option value="group">Group</option>
-            <option value="webinar">Webinar</option>
-          </select>
-          <select className="field" value={payload.templateId || ""} onChange={(event) => setPayload((current) => ({ ...current, templateId: event.target.value || undefined }))}>
-            <option value="">No template</option>
-            {templates.map((template) => <option key={template._id} value={template._id}>{template.name}</option>)}
-          </select>
+          <Field id="meeting-title" label="Meeting title">
+            <input id="meeting-title" className="field" placeholder="Weekly team sync" value={payload.title} onChange={(event) => setPayload((current) => ({ ...current, title: event.target.value }))} />
+          </Field>
+          <Field id="meeting-start" label="Scheduled start">
+            <input id="meeting-start" className="field" type="datetime-local" value={payload.scheduledStartTime} onChange={(event) => setPayload((current) => ({ ...current, scheduledStartTime: event.target.value }))} />
+          </Field>
+          <Field id="meeting-description" label="Description">
+            <textarea id="meeting-description" className="field md:col-span-2" rows={3} placeholder="Agenda, goals, or context" value={payload.description} onChange={(event) => setPayload((current) => ({ ...current, description: event.target.value }))} />
+          </Field>
+          <Field id="meeting-duration" label="Expected duration (minutes)">
+            <input id="meeting-duration" className="field" type="number" placeholder="30" value={payload.expectedDuration} onChange={(event) => setPayload((current) => ({ ...current, expectedDuration: Number(event.target.value) }))} />
+          </Field>
+          <Field id="meeting-capacity" label="Participant limit">
+            <input id="meeting-capacity" className="field" type="number" placeholder="10" value={payload.maxParticipants} onChange={(event) => setPayload((current) => ({ ...current, maxParticipants: Number(event.target.value) }))} />
+          </Field>
+          <Field id="meeting-type" label="Meeting type">
+            <select id="meeting-type" className="field" value={payload.meetingType} onChange={(event) => setPayload((current) => ({ ...current, meetingType: event.target.value }))}>
+              <option value="one-on-one">One-on-one</option>
+              <option value="group">Group</option>
+              <option value="webinar">Webinar</option>
+            </select>
+          </Field>
+          <Field id="meeting-template" label="Template">
+            <select id="meeting-template" className="field" value={payload.templateId || ""} onChange={(event) => setPayload((current) => ({ ...current, templateId: event.target.value || undefined }))}>
+              <option value="">No template</option>
+              {templates.map((template) => <option key={template._id} value={template._id}>{template.name}</option>)}
+            </select>
+          </Field>
+          <div className="panel md:col-span-2 space-y-4 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold">Share meeting</h3>
+                <p className="text-sm text-brand-muted">Copy the join link and invite people by email.</p>
+              </div>
+              <button
+                className="btn-secondary"
+                disabled={!createdMeetingLink}
+                aria-label="Copy meeting join link"
+                onClick={async () => {
+                  try {
+                    await copyMeetingLink(createdMeetingLink);
+                  } catch (error) {
+                    logActionError("Copy meeting link", error);
+                  }
+                }}
+              >
+                Copy join link
+              </button>
+            </div>
+            <InviteEmailField
+              id="meeting-invite-emails"
+              label="Invite participants by email"
+              hint="Add one or more email addresses separated by commas or new lines."
+              value={inviteEmails}
+              onChange={setInviteEmails}
+              onRemove={(email) => setInviteEmails((current) => removeInviteEmail(current, email))}
+            />
+            <div className="flex flex-wrap gap-3">
+              <button
+                className="btn-primary"
+                disabled={!createdMeetingId || !parseInviteEmails(inviteEmails).length}
+                aria-label="Send meeting invites"
+                onClick={async () => {
+                  try {
+                    await meetingService.update(createdMeetingId, {
+                      invitedParticipants: toInvitePayload(inviteEmails)
+                    });
+                    toast.success("Invitations sent.");
+                  } catch (error) {
+                    logActionError("Send invites from create form", error);
+                  }
+                }}
+              >
+                Send invites
+              </button>
+              {createdMeetingLink ? <p className="text-sm text-brand-accent" role="status" aria-live="polite">{createdMeetingLink}</p> : null}
+            </div>
+          </div>
           <div className="panel md:col-span-2 grid gap-3 p-4">
             {[
               ["waitingRoomEnabled", "Waiting room"],
@@ -209,16 +358,26 @@ export function MeetingsPage() {
               </label>
             ))}
           </div>
-          <div className="md:col-span-2">
-            <LoadingButton className="btn-primary w-full" onClick={async () => {
-              const meeting = await meetingService.create({
-                ...payload,
-                scheduledStartTime: payload.scheduledStartTime ? new Date(payload.scheduledStartTime).toISOString() : undefined
-              });
-              setItems((current) => [meeting, ...current]);
-              setModalOpen(false);
-              toast.success("Meeting created.");
+          <div className="md:col-span-2 flex flex-wrap gap-3">
+            <LoadingButton className="btn-primary flex-1" aria-label="Create meeting and prepare share link" onClick={async () => {
+              try {
+                const meeting = await meetingService.create({
+                  ...payload,
+                  invitedParticipants: toInvitePayload(inviteEmails),
+                  scheduledStartTime: payload.scheduledStartTime ? new Date(payload.scheduledStartTime).toISOString() : undefined
+                });
+                setItems((current) => [meeting, ...current]);
+                setCreatedMeetingLink(meeting.joinUrl || `https://onnonn.niveel.com/join/${meeting.meetingId}`);
+                setCreatedMeetingId(meeting.meetingId);
+                toast.success("Meeting created.");
+              } catch (error) {
+                logActionError("Create meeting", error);
+              }
             }}>Create meeting</LoadingButton>
+            <button className="btn-secondary" aria-label="Close create meeting dialog" onClick={() => {
+              setModalOpen(false);
+              setSearchParams({});
+            }}>Done</button>
           </div>
         </div>
       </Modal>
@@ -234,6 +393,7 @@ export function MeetingDetailPage() {
   const [coaching, setCoaching] = useState(null);
   const [sentiment, setSentiment] = useState(null);
   const [notes, setNotes] = useState([]);
+  const [inviteEmails, setInviteEmails] = useState("");
   const announce = useUiStore((state) => state.announce);
 
   useEffect(() => {
@@ -251,24 +411,78 @@ export function MeetingDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Section title={meeting.title} actions={<button className="btn-primary" onClick={() => {
-        window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title });
-        announce(`Opening ${meeting.title}.`);
-      }}>Join</button>}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="text-sm text-brand-muted">{meeting.description || "No description provided."}</p>
-            <p className="mt-3 text-sm text-brand-muted">Join link: {meeting.joinUrl}</p>
-            <div className="mt-4 flex gap-2">
-              <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(meeting.joinUrl)}>Copy join link</button>
-              <button className="btn-secondary" onClick={() => meetingService.cancel(meeting.meetingId).then(setMeeting)}>Cancel</button>
+      <Section
+        title={meeting.title}
+        actions={<button className="btn-primary" aria-label="Join meeting" onClick={() => {
+          try {
+            window.electronAPI.openMeetingWindow({ meetingId: meeting.meetingId, title: meeting.title });
+            announce(`Opening ${meeting.title}.`);
+          } catch (error) {
+            logActionError("Join meeting", error);
+          }
+        }}>Join meeting</button>}
+      >
+        <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+          <div className="space-y-5">
+            <div>
+              <h3 className="text-base font-semibold">Share Meeting</h3>
+              <p className="mt-1 text-sm text-brand-muted">{meeting.description || "No description provided."}</p>
             </div>
+            <Field id="share-join-url" label="Join URL">
+              <input id="share-join-url" className="field" readOnly value={meeting.joinUrl || `https://onnonn.niveel.com/join/${meeting.meetingId}`} />
+            </Field>
+            <div className="flex flex-wrap gap-3">
+              <button className="btn-primary" aria-label="Copy full join link" onClick={async () => {
+                try {
+                  await copyMeetingLink(meeting.joinUrl || `https://onnonn.niveel.com/join/${meeting.meetingId}`);
+                } catch (error) {
+                  logActionError("Copy join link", error);
+                }
+              }}>Copy join link</button>
+              <button className="btn-secondary" aria-label="Cancel meeting" onClick={async () => {
+                try {
+                  const updated = await meetingService.cancel(meeting.meetingId);
+                  setMeeting(updated);
+                  toast.success("Meeting cancelled.");
+                } catch (error) {
+                  logActionError("Cancel meeting", error);
+                }
+              }}>Cancel meeting</button>
+            </div>
+            <InviteEmailField
+              id="detail-invite-emails"
+              label="Invite participants by email"
+              hint="Add email addresses separated by commas or one per line."
+              value={inviteEmails}
+              onChange={setInviteEmails}
+              onRemove={(email) => setInviteEmails((current) => removeInviteEmail(current, email))}
+            />
+            <button className="btn-secondary" disabled={!parseInviteEmails(inviteEmails).length} aria-label="Send meeting invites" onClick={async () => {
+              try {
+                const updated = await meetingService.update(meeting.meetingId, {
+                  invitedParticipants: toInvitePayload(inviteEmails)
+                });
+                setMeeting(updated);
+                toast.success("Invitations sent.");
+              } catch (error) {
+                logActionError("Send meeting invites", error);
+              }
+            }}>Send invites</button>
           </div>
-          <div className="space-y-2 text-sm text-brand-muted">
-            <p>Status: {meeting.status}</p>
-            <p>Scheduled: {meeting.scheduledStartTime ? format(new Date(meeting.scheduledStartTime), "PPpp") : "Instant"}</p>
-            <p>Meeting type: {meeting.meetingType}</p>
-            <p>Meeting ID: {meeting.meetingId}</p>
+          <div className="grid gap-3 text-sm text-brand-muted">
+            {[
+              ["Meeting ID", meeting.meetingId],
+              ["Join URL", meeting.joinUrl || `https://onnonn.niveel.com/join/${meeting.meetingId}`],
+              ["Scheduled time", meeting.scheduledStartTime ? format(new Date(meeting.scheduledStartTime), "PPpp") : "Instant"],
+              ["Duration", `${meeting.expectedDuration || 30} minutes`],
+              ["Participant limit", String(meeting.maxParticipants || "Not set")],
+              ["Status", meeting.status]
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-2xl border border-brand-800 bg-brand-950/50 p-4">
+                <p className="text-xs uppercase tracking-wide text-brand-muted">{label}</p>
+                <p className="mt-2 text-sm text-brand-text break-all">{value}</p>
+              </div>
+            ))}
           </div>
         </div>
       </Section>
@@ -487,6 +701,8 @@ export function SettingsPage() {
   const [sessions, setSessions] = useState([]);
   const [twoFactorSetup, setTwoFactorSetup] = useState(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [disableTwoFactorPassword, setDisableTwoFactorPassword] = useState("");
+  const [deleteConfirmationEmail, setDeleteConfirmationEmail] = useState("");
   const [googleStatus, setGoogleStatus] = useState(null);
   const [availability, setAvailability] = useState({ bookingHandle: "", slots: [], meetingDuration: 30, bufferMinutes: 15, isActive: true });
 
@@ -552,7 +768,9 @@ export function SettingsPage() {
             announce("Two-factor authentication enabled.");
             await refreshCurrentUser();
           })}>Enable 2FA</button> : null}
-          <button className="btn-secondary" onClick={() => authService.disable2FA(prompt("Enter your password to disable 2FA") || "").then(async () => {
+          <input className="field" type="password" placeholder="Current password to disable 2FA" value={disableTwoFactorPassword} onChange={(event) => setDisableTwoFactorPassword(event.target.value)} />
+          <button className="btn-secondary" onClick={() => authService.disable2FA(disableTwoFactorPassword).then(async () => {
+            setDisableTwoFactorPassword("");
             toast.success("Two-factor authentication disabled.");
             announce("Two-factor authentication disabled.");
             await refreshCurrentUser();
@@ -627,13 +845,19 @@ export function SettingsPage() {
         })}>Revoke</button></div>) : <EmptyState title="No active sessions listed" description="Signed-in devices will appear here for quick revocation." />}
       </Section>
       <Section title="Danger zone">
-        <button className="btn-secondary" onClick={() => {
-          const email = prompt("Type your email address to confirm account deletion request.");
-          if (email === user?.email) {
-            orgService.requestGdpr("deletion");
-          }
-        }}>Delete account</button>
+        <div className="space-y-3">
+          <p className="text-sm text-brand-muted">Type {user?.email || "your email"} to request account deletion.</p>
+          <input className="field" placeholder="Confirm your email address" value={deleteConfirmationEmail} onChange={(event) => setDeleteConfirmationEmail(event.target.value)} />
+          <button className="btn-secondary" disabled={deleteConfirmationEmail !== user?.email} onClick={() => {
+            orgService.requestGdpr("deletion").then(() => {
+              toast.success("Deletion request submitted.");
+              announce("Deletion request submitted.");
+              setDeleteConfirmationEmail("");
+            });
+          }}>Delete account</button>
+        </div>
       </Section>
     </div>
   );
 }
+

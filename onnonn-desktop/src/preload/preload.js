@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+function subscribe(channel, listener) {
+  const wrapped = (_event, payload) => listener(payload);
+  ipcRenderer.on(channel, wrapped);
+  return () => {
+    ipcRenderer.removeListener(channel, wrapped);
+  };
+}
+
 contextBridge.exposeInMainWorld("electronAPI", {
   getSession: () => ipcRenderer.invoke("session:get"),
   setSession: (payload) => ipcRenderer.invoke("session:set", payload),
@@ -12,7 +20,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getPendingProtocolUrls: () => ipcRenderer.invoke("protocol:getPending"),
   selectScreenShareSource: (sourceId) => ipcRenderer.invoke("screen-share:setSource", sourceId),
   listDesktopSources: () => ipcRenderer.invoke("screen-share:listSources"),
-  onProtocolUrl: (callback) => ipcRenderer.on("protocol:url", (_event, url) => callback(url)),
-  onStartInstantMeeting: (callback) => ipcRenderer.on("app:start-instant-meeting", callback),
-  onMeetingJoin: (callback) => ipcRenderer.on("meeting:join", (_event, payload) => callback(payload))
+  onProtocolUrl: (callback) => subscribe("protocol:url", callback),
+  onStartInstantMeeting: (callback) => subscribe("app:start-instant-meeting", callback),
+  onMeetingJoin: (callback) => subscribe("meeting:join", callback),
+  onSessionRefreshed: (callback) => subscribe("session:refreshed", callback)
 });
