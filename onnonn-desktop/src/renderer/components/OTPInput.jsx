@@ -24,10 +24,22 @@ export function OTPInput({ value, onChange, idPrefix = "otp-digit" }) {
           }}
           value={digit.trim()}
           inputMode="numeric"
+          autoComplete={index === 0 ? "one-time-code" : "off"}
+          name={`${idPrefix}-${index}`}
           maxLength={1}
           className="field h-14 w-12 text-center text-lg"
           aria-label={`Verification code digit ${index + 1}`}
           onChange={(event) => updateDigit(index, event.target.value.replace(/\D/g, ""))}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+            if (!pasted) {
+              return;
+            }
+            event.preventDefault();
+            onChange(pasted);
+            const nextIndex = Math.min(pasted.length - 1, 5);
+            refs.current[nextIndex]?.focus();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Backspace" && !digits[index].trim() && refs.current[index - 1]) {
               refs.current[index - 1].focus();

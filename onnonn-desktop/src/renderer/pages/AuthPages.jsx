@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { ArrowRight, BadgeCheck, KeyRound, MailCheck, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { authService } from "../services/authService";
 import { getErrorMessage } from "../services/api";
@@ -17,9 +18,27 @@ function AuthShell({ title, subtitle, children }) {
       <div className="grid w-full max-w-6xl gap-10 lg:grid-cols-[1.1fr,0.9fr]">
         <div className="hidden rounded-[32px] border border-brand-800 bg-brand-900/80 p-10 shadow-panel lg:block">
           <div className="max-w-lg">
-            <p className="inline-flex rounded-full bg-brand-accent/15 px-3 py-1 text-sm text-brand-accent">Onnonn Desktop</p>
+            <p className="inline-flex items-center gap-2 rounded-full bg-brand-accent/15 px-3 py-1 text-sm text-brand-accent"><Sparkles size={14} />Onnonn Desktop</p>
             <h1 className="mt-8 text-5xl font-semibold leading-tight text-brand-text">Native meetings, recordings, AI notes, and teamwork in one place.</h1>
             <p className="mt-6 text-lg text-brand-muted">Join secure meetings instantly, manage everything from your desktop, and keep your session available across app restarts.</p>
+            <div className="mt-10 space-y-4">
+              {[
+                { icon: ShieldCheck, title: "Secure sessions", body: "Your session stays available across restarts with automatic refresh in the background." },
+                { icon: BadgeCheck, title: "Accessible by design", body: "Keyboard shortcuts, clear focus states, and spoken status updates keep every workflow easier to use." },
+                { icon: MailCheck, title: "Fast recovery", body: "Verification codes and password reset codes arrive with a simple, guided desktop flow." }
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.title} className="flex gap-4 rounded-2xl border border-brand-800/80 bg-brand-950/40 p-4">
+                    <div className="mt-1 rounded-2xl bg-brand-accent/15 p-3 text-brand-accent"><Icon size={18} /></div>
+                    <div>
+                      <p className="font-medium text-brand-text">{item.title}</p>
+                      <p className="mt-1 text-sm text-brand-muted">{item.body}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
         <div className="panel mx-auto w-full max-w-xl p-8">
@@ -65,6 +84,7 @@ export function LoginPage() {
           await auth.login(values);
           navigate("/app/home", { replace: true });
         } catch (error) {
+          console.error("[Onnonn Desktop] Login failed", error);
           setFormError(getErrorMessage(error));
         }
       })}>
@@ -84,6 +104,7 @@ export function LoginPage() {
           await window.electronAPI.openExternal(buildDesktopOAuthUrl(url, "login"));
           toast.success("Google sign-in opened in your browser.");
         } catch (error) {
+          console.error("[Onnonn Desktop] Google login failed", error);
           setFormError(getErrorMessage(error));
         } finally {
           setLoadingGoogle(false);
@@ -115,6 +136,7 @@ export function RegisterPage() {
           const user = await authService.register(values);
           navigate("/verify-email", { state: { email: user.email || values.email } });
         } catch (error) {
+          console.error("[Onnonn Desktop] Registration failed", error);
           setFormError(getErrorMessage(error));
         }
       })}>
@@ -165,6 +187,7 @@ export function VerifyEmailPage() {
             toast.success("Email verified.");
             navigate("/login", { replace: true });
           } catch (error) {
+            console.error("[Onnonn Desktop] Email verification failed", error);
             setFormError(getErrorMessage(error));
           }
         }}>Verify</LoadingButton>
@@ -175,6 +198,7 @@ export function VerifyEmailPage() {
             setCooldown(60);
             toast.success("Verification code sent.");
           } catch (error) {
+            console.error("[Onnonn Desktop] Resend verification failed", error);
             setFormError(getErrorMessage(error));
           }
         }}>{cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}</button>
@@ -187,46 +211,109 @@ export function ForgotPasswordPage() {
   const navigate = useNavigate();
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
   const [formError, setFormError] = useState("");
   const schema = useMemo(() => z.object({
     email: z.string().email(),
-    newPassword: z.string().min(8).optional()
+    newPassword: z.string().optional()
   }), []);
   const form = useForm({ resolver: zodResolver(schema), defaultValues: { email: "", newPassword: "" } });
 
+  React.useEffect(() => {
+    if (!cooldown) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setCooldown((current) => current - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+
   return (
     <AuthShell title="Reset password" subtitle="Request a one-time passcode and choose a new password.">
-      <form className="space-y-4" onSubmit={form.handleSubmit(async (values) => {
+      <form className="space-y-5" onSubmit={form.handleSubmit(async (values) => {
         setFormError("");
         try {
           if (!sent) {
-            await authService.forgotPassword(values.email);
+            await authService.forgotPassword(values.email.trim());
             setSent(true);
+            setCooldown(60);
             toast.success("Password reset code sent.");
             return;
           }
-          await authService.resetPassword({ email: values.email, code, newPassword: values.newPassword });
+          if (code.trim().length !== 6) {
+            setFormError("Enter the full 6-digit reset code.");
+            return;
+          }
+          if (!values.newPassword || values.newPassword.length < 8) {
+            setFormError("New password must be at least 8 characters.");
+            return;
+          }
+          await authService.resetPassword({ email: values.email.trim(), code: code.trim(), newPassword: values.newPassword });
           toast.success("Password updated.");
           navigate("/login", { replace: true });
         } catch (error) {
+          console.error("[Onnonn Desktop] Password reset flow failed", error);
           setFormError(getErrorMessage(error));
         }
       })}>
         <Field id="forgot-email" label="Email address" error={form.formState.errors.email?.message}>
           <input id="forgot-email" className="field" type="email" placeholder="you@example.com" autoComplete="email" {...form.register("email")} />
         </Field>
+        {!sent ? (
+          <div className="rounded-2xl border border-brand-800 bg-brand-950/40 p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-brand-accent/15 p-3 text-brand-accent"><MailCheck size={18} /></div>
+              <div>
+                <p className="text-sm font-medium text-brand-text">Step 1: Request your reset code</p>
+                <p className="mt-1 text-sm text-brand-muted">We’ll email a 6-digit code you can enter here on the next step.</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {sent && (
           <>
+            <div className="rounded-2xl border border-brand-800 bg-brand-950/40 p-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-brand-accent/15 p-3 text-brand-accent"><KeyRound size={18} /></div>
+                <div>
+                  <p className="text-sm font-medium text-brand-text">Step 2: Enter the code and create a new password</p>
+                  <p className="mt-1 text-sm text-brand-muted">Paste the 6-digit code from your email, then choose a new password.</p>
+                </div>
+              </div>
+            </div>
             <Field id="reset-code-0" label="Reset code">
               <OTPInput idPrefix="reset-code" value={code} onChange={setCode} />
             </Field>
             <Field id="forgot-new-password" label="New password" error={form.formState.errors.newPassword?.message}>
               <input id="forgot-new-password" className="field" type="password" placeholder="Choose a new password" autoComplete="new-password" {...form.register("newPassword")} />
             </Field>
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              disabled={cooldown > 0 || form.formState.isSubmitting}
+              aria-label="Resend password reset code"
+              onClick={async () => {
+                try {
+                  setFormError("");
+                  await authService.forgotPassword(form.getValues("email").trim());
+                  setCooldown(60);
+                  toast.success("A fresh reset code has been sent.");
+                } catch (error) {
+                  console.error("[Onnonn Desktop] Resend reset code failed", error);
+                  setFormError(getErrorMessage(error));
+                }
+              }}
+            >
+              {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend reset code"}
+            </button>
           </>
         )}
         {formError ? <p className="form-error" role="alert">{formError}</p> : null}
-        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full" aria-label={sent ? "Reset password" : "Send reset code"}>{sent ? "Reset password" : "Send OTP"}</LoadingButton>
+        <LoadingButton loading={form.formState.isSubmitting} type="submit" className="btn-primary w-full" aria-label={sent ? "Reset password" : "Send reset code"}>
+          <span className="inline-flex items-center gap-2">
+            {sent ? "Reset password" : "Send reset code"}
+            <ArrowRight size={16} />
+          </span>
+        </LoadingButton>
       </form>
       <p className="mt-6 text-sm text-brand-muted">Remembered it? <Link to="/login" className="text-brand-accent">Back to sign in</Link></p>
     </AuthShell>
