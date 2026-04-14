@@ -16,7 +16,15 @@ async function deleteRoom(room) {
   if (!roomService) {
     return null;
   }
-  return roomService.deleteRoom(room);
+  try {
+    return await roomService.deleteRoom(room);
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (message.includes("requested room does not exist")) {
+      return null;
+    }
+    throw new LiveKitError("Unable to delete LiveKit room", { message });
+  }
 }
 
 async function listParticipants(room) {
