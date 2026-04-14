@@ -63,6 +63,23 @@ function removeInviteEmail(value, emailToRemove) {
     .join(", ");
 }
 
+const DEFAULT_MEETING_PAYLOAD = {
+  title: "",
+  description: "",
+  scheduledStartTime: "",
+  expectedDuration: 30,
+  maxParticipants: 10,
+  meetingType: "group",
+  waitingRoomEnabled: false,
+  muteOnEntry: false,
+  allowSelfUnmute: true,
+  autoRecord: false,
+  e2eEncryptionEnabled: false,
+  password: "",
+  instantMeeting: false,
+  invitedParticipants: []
+};
+
 function InviteEmailField({ id, label, value, onChange, onRemove, hint }) {
   const emails = parseInviteEmails(value);
 
@@ -191,10 +208,11 @@ export function MeetingsPage() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(Boolean(searchParams.get("new")));
-  const [payload, setPayload] = useState({ title: "", description: "", scheduledStartTime: "", expectedDuration: 30, maxParticipants: 10, meetingType: "group", waitingRoomEnabled: false, muteOnEntry: false, allowSelfUnmute: true, autoRecord: false, e2eEncryptionEnabled: false, invitedParticipants: [] });
+  const [payload, setPayload] = useState(DEFAULT_MEETING_PAYLOAD);
   const [inviteEmails, setInviteEmails] = useState("");
   const [createdMeetingLink, setCreatedMeetingLink] = useState("");
   const [createdMeetingId, setCreatedMeetingId] = useState("");
+  const [meetingMode, setMeetingMode] = useState(searchParams.get("new") === "instant" ? "instant" : "scheduled");
   const announce = useUiStore((state) => state.announce);
   const navigate = useNavigate();
 
@@ -206,6 +224,13 @@ export function MeetingsPage() {
   useEffect(() => {
     if (searchParams.get("new")) {
       setModalOpen(true);
+      const isInstant = searchParams.get("new") === "instant";
+      setMeetingMode(isInstant ? "instant" : "scheduled");
+      setPayload((current) => ({
+        ...current,
+        instantMeeting: isInstant,
+        scheduledStartTime: isInstant ? "" : current.scheduledStartTime
+      }));
     }
   }, [searchParams]);
 
@@ -250,8 +275,24 @@ export function MeetingsPage() {
                   announce(`Opening ${meeting.title}.`);
                 }}>Join</button>
                 <button className="btn-secondary" onClick={() => navigate(`/app/meetings/${meeting.meetingId}`)}>Edit</button>
-                <button className="btn-secondary" onClick={() => meetingService.cancel(meeting.meetingId).then((updated) => setItems((current) => current.map((item) => item.meetingId === meeting.meetingId ? updated : item)))}>Cancel</button>
-                <button className="btn-secondary" onClick={() => meetingService.cancel(meeting.meetingId).then(() => setItems((current) => current.filter((item) => item.meetingId !== meeting.meetingId)))}>Delete</button>
+                <button className="btn-secondary" onClick={async () => {
+                  try {
+                    const updated = await meetingService.cancel(meeting.meetingId);
+                    setItems((current) => current.map((item) => item.meetingId === meeting.meetingId ? updated : item));
+                    toast.success("Meeting cancelled.");
+                  } catch (error) {
+                    logActionError("Cancel meeting from list", error);
+                  }
+                }}>Cancel</button>
+                <button className="btn-secondary" onClick={async () => {
+                  try {
+                    await meetingService.remove(meeting.meetingId);
+                    setItems((current) => current.filter((item) => item.meetingId !== meeting.meetingId));
+                    toast.success("Meeting deleted.");
+                  } catch (error) {
+                    logActionError("Delete meeting from list", error);
+                  }
+                }}>Delete</button>
               </div>
             </div>
           ))}
@@ -264,14 +305,41 @@ export function MeetingsPage() {
         setCreatedMeetingLink("");
         setCreatedMeetingId("");
         setInviteEmails("");
+        setMeetingMode("scheduled");
+        setPayload(DEFAULT_MEETING_PAYLOAD);
       }} title="Create meeting">
         <div className="grid gap-4 md:grid-cols-2">
           <Field id="meeting-title" label="Meeting title">
             <input id="meeting-title" className="field" placeholder="Weekly team sync" value={payload.title} onChange={(event) => setPayload((current) => ({ ...current, title: event.target.value }))} />
           </Field>
-          <Field id="meeting-start" label="Scheduled start">
-            <input id="meeting-start" className="field" type="datetime-local" value={payload.scheduledStartTime} onChange={(event) => setPayload((current) => ({ ...current, scheduledStartTime: event.target.value }))} />
+          <Field id="meeting-mode" label="Meeting mode">
+            <select
+              id="meeting-mode"
+              className="field"
+              value={meetingMode}
+              onChange={(event) => {
+                const nextMode = event.target.value;
+                setMeetingMode(nextMode);
+                setPayload((current) => ({
+                  ...current,
+                  instantMeeting: nextMode === "instant",
+                  scheduledStartTime: nextMode === "instant" ? "" : current.scheduledStartTime
+                }));
+              }}
+            >
+              <option value="scheduled">Scheduled meeting</option>
+              <option value="instant">Instant meeting</option>
+            </select>
           </Field>
+          {meetingMode === "scheduled" ? (
+            <Field id="meeting-start" label="Scheduled start">
+              <input id="meeting-start" className="field" type="datetime-local" value={payload.scheduledStartTime} onChange={(event) => setPayload((current) => ({ ...current, scheduledStartTime: event.target.value }))} />
+            </Field>
+          ) : (
+            <div className="rounded-2xl border border-brand-800 bg-brand-950/50 px-4 py-3 text-sm text-brand-muted">
+              Instant meetings start right away and do not require a date or time.
+            </div>
+          )}
           <Field id="meeting-description" label="Description">
             <textarea id="meeting-description" className="field md:col-span-2" rows={3} placeholder="Agenda, goals, or context" value={payload.description} onChange={(event) => setPayload((current) => ({ ...current, description: event.target.value }))} />
           </Field>
@@ -293,6 +361,16 @@ export function MeetingsPage() {
               <option value="">No template</option>
               {templates.map((template) => <option key={template._id} value={template._id}>{template.name}</option>)}
             </select>
+          </Field>
+          <Field id="meeting-password" label="Meeting password">
+            <input
+              id="meeting-password"
+              className="field"
+              type="password"
+              placeholder="Optional password for guests and participants"
+              value={payload.password}
+              onChange={(event) => setPayload((current) => ({ ...current, password: event.target.value }))}
+            />
           </Field>
           <div className="panel md:col-span-2 space-y-4 p-4">
             <div className="flex items-center justify-between">
@@ -364,7 +442,8 @@ export function MeetingsPage() {
                 const meeting = await meetingService.create({
                   ...payload,
                   invitedParticipants: toInvitePayload(inviteEmails),
-                  scheduledStartTime: payload.scheduledStartTime ? new Date(payload.scheduledStartTime).toISOString() : undefined
+                  instantMeeting: meetingMode === "instant",
+                  scheduledStartTime: meetingMode === "scheduled" && payload.scheduledStartTime ? new Date(payload.scheduledStartTime).toISOString() : undefined
                 });
                 setItems((current) => [meeting, ...current]);
                 setCreatedMeetingLink(meeting.joinUrl || `https://onnonn.niveel.com/join/${meeting.meetingId}`);
@@ -377,6 +456,11 @@ export function MeetingsPage() {
             <button className="btn-secondary" aria-label="Close create meeting dialog" onClick={() => {
               setModalOpen(false);
               setSearchParams({});
+              setMeetingMode("scheduled");
+              setPayload(DEFAULT_MEETING_PAYLOAD);
+              setInviteEmails("");
+              setCreatedMeetingLink("");
+              setCreatedMeetingId("");
             }}>Done</button>
           </div>
         </div>
@@ -387,6 +471,7 @@ export function MeetingsPage() {
 
 export function MeetingDetailPage() {
   const { meetingId } = useParams();
+  const navigate = useNavigate();
   const [meeting, setMeeting] = useState(null);
   const [summary, setSummary] = useState(null);
   const [items, setItems] = useState([]);
@@ -394,6 +479,7 @@ export function MeetingDetailPage() {
   const [sentiment, setSentiment] = useState(null);
   const [notes, setNotes] = useState([]);
   const [inviteEmails, setInviteEmails] = useState("");
+  const [meetingPassword, setMeetingPassword] = useState("");
   const announce = useUiStore((state) => state.announce);
 
   useEffect(() => {
@@ -448,6 +534,16 @@ export function MeetingDetailPage() {
                   logActionError("Cancel meeting", error);
                 }
               }}>Cancel meeting</button>
+              <button className="btn-secondary" aria-label="Delete meeting" onClick={async () => {
+                try {
+                  await meetingService.remove(meeting.meetingId);
+                  toast.success("Meeting deleted.");
+                  announce(`${meeting.title} deleted.`);
+                  navigate("/app/meetings");
+                } catch (error) {
+                  logActionError("Delete meeting", error);
+                }
+              }}>Delete meeting</button>
             </div>
             <InviteEmailField
               id="detail-invite-emails"
@@ -468,6 +564,28 @@ export function MeetingDetailPage() {
                 logActionError("Send meeting invites", error);
               }
             }}>Send invites</button>
+            <Field id="detail-meeting-password" label="Meeting password">
+              <div className="flex flex-wrap gap-3">
+                <input
+                  id="detail-meeting-password"
+                  className="field flex-1"
+                  type="password"
+                  placeholder="Set or update the meeting password"
+                  value={meetingPassword}
+                  onChange={(event) => setMeetingPassword(event.target.value)}
+                />
+                <button className="btn-secondary" aria-label="Save meeting password" onClick={async () => {
+                  try {
+                    const updated = await meetingService.update(meeting.meetingId, { password: meetingPassword });
+                    setMeeting(updated);
+                    setMeetingPassword("");
+                    toast.success("Meeting password saved.");
+                  } catch (error) {
+                    logActionError("Save meeting password", error);
+                  }
+                }}>Save password</button>
+              </div>
+            </Field>
           </div>
           <div className="grid gap-3 text-sm text-brand-muted">
             {[

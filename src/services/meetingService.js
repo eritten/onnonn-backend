@@ -26,6 +26,21 @@ const { uploadBuffer } = require("./storageService");
 
 const uid = new ShortUniqueId({ length: 10 });
 
+function isMongoObjectId(value) {
+  return /^[a-f\d]{24}$/i.test(String(value || ""));
+}
+
+async function findMeetingByIdentifier(meetingIdentifier) {
+  if (!meetingIdentifier) {
+    return null;
+  }
+  const orConditions = [{ meetingId: meetingIdentifier }];
+  if (isMongoObjectId(meetingIdentifier)) {
+    orConditions.push({ _id: meetingIdentifier });
+  }
+  return Meeting.findOne({ $or: orConditions });
+}
+
 async function getSubscriptionPlan(userId) {
   const subscription = await Subscription.findOne({ user: userId }).populate("plan");
   if (!subscription) {
@@ -144,7 +159,8 @@ async function computePollResultsForBroadcast(pollId) {
 
 async function createMeeting(hostId, payload, requestContext = {}) {
   const { plan } = await getSubscriptionPlan(hostId);
-  const scheduledStartTime = payload.scheduledStartTime || new Date().toISOString();
+  const isInstantMeeting = payload.instantMeeting || !payload.scheduledStartTime;
+  const scheduledStartTime = isInstantMeeting ? new Date().toISOString() : payload.scheduledStartTime;
   const maxParticipants = payload.maxParticipants || plan.limits.maxParticipantsPerMeeting;
   if (maxParticipants > plan.limits.maxParticipantsPerMeeting) {
     throw new PlanLimitError("Participant limit exceeds your plan", { limit: plan.limits.maxParticipantsPerMeeting });
@@ -249,7 +265,7 @@ async function listMeetings(userId, query) {
 }
 
 async function getMeetingByMeetingId(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId }).populate("host coHostIds template");
+  const meeting = await findMeetingByIdentifier(meetingId).populate("host coHostIds template");
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -257,7 +273,7 @@ async function getMeetingByMeetingId(meetingId) {
 }
 
 async function updateMeeting(meetingId, userId, payload) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -303,7 +319,7 @@ async function updateMeeting(meetingId, userId, payload) {
 }
 
 async function cancelMeeting(meetingId, userId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -322,8 +338,30 @@ async function cancelMeeting(meetingId, userId) {
   return meeting;
 }
 
+async function deleteMeeting(meetingId, userId) {
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
+  if (meeting.host.toString() !== userId.toString()) {
+    throw new AuthorizationError("Only the host can delete the meeting");
+  }
+  await deleteRoom(meeting.liveKitRoomName);
+  await Promise.all([
+    MeetingParticipant.deleteMany({ meeting: meeting._id }),
+    BreakoutRoom.deleteMany({ meeting: meeting._id }),
+    Poll.deleteMany({ meeting: meeting._id }),
+    QnAQuestion.deleteMany({ meeting: meeting._id, meetingRefModel: "Meeting" }),
+    ChatMessage.deleteMany({ meeting: meeting._id }),
+    Whiteboard.deleteOne({ meeting: meeting._id }),
+    MeetingNote.deleteMany({ meeting: meeting._id }),
+    Meeting.deleteOne({ _id: meeting._id })
+  ]);
+  return { deleted: true, meetingId: meeting.meetingId };
+}
+
 async function endMeeting(meetingId, userId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -343,8 +381,8 @@ async function endMeeting(meetingId, userId) {
   return meeting;
 }
 
-async function generateParticipantToken({ meetingId, userId, guestName, password }) {
-  const meeting = await Meeting.findOne({ meetingId });
+async function generateParticipantToken({ meetingId, userId, guestName, guestEmail, password }) {
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -377,6 +415,7 @@ async function generateParticipantToken({ meetingId, userId, guestName, password
   await MeetingParticipant.create({
     meeting: meeting._id,
     user: userId,
+    email: guestEmail,
     guestName,
     role: userId?.toString() === meeting.host.toString() ? "host" : guestName ? "guest" : "participant"
   });
@@ -384,13 +423,13 @@ async function generateParticipantToken({ meetingId, userId, guestName, password
 }
 
 async function listWaitingParticipants(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const entries = await getRedis().zrange(`waiting-room:${meeting._id}`, 0, -1);
   return entries.map((entry) => JSON.parse(entry));
 }
 
 async function admitWaitingParticipant(meetingId, identity) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const entries = await getRedis().zrange(`waiting-room:${meeting._id}`, 0, -1);
   const match = entries.find((entry) => JSON.parse(entry).identity === identity);
   if (match) {
@@ -403,7 +442,7 @@ async function admitWaitingParticipant(meetingId, identity) {
 }
 
 async function rejectWaitingParticipant(meetingId, identity) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const entries = await getRedis().zrange(`waiting-room:${meeting._id}`, 0, -1);
   const match = entries.find((entry) => JSON.parse(entry).identity === identity);
   if (match) {
@@ -422,7 +461,7 @@ async function admitAllWaiting(meetingId) {
 }
 
 async function listCurrentParticipants(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -430,29 +469,50 @@ async function listCurrentParticipants(meetingId) {
 }
 
 async function removeCurrentParticipant(meetingId, identity) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   return removeParticipant(meeting.liveKitRoomName, identity);
 }
 
 async function muteParticipant(meetingId, identity, trackSid, muted) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   return mutePublishedTrack(meeting.liveKitRoomName, identity, trackSid, muted);
 }
 
 async function addCoHost(meetingId, userId) {
-  return Meeting.findOneAndUpdate({ meetingId }, { $addToSet: { coHostIds: userId } }, { new: true });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
+  meeting.coHostIds = [...new Set([...meeting.coHostIds.map((id) => id.toString()), userId.toString()])];
+  await meeting.save();
+  return meeting;
 }
 
 async function removeCoHost(meetingId, userId) {
-  return Meeting.findOneAndUpdate({ meetingId }, { $pull: { coHostIds: userId } }, { new: true });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
+  meeting.coHostIds = meeting.coHostIds.filter((id) => id.toString() !== userId.toString());
+  await meeting.save();
+  return meeting;
 }
 
 async function setMeetingLock(meetingId, locked) {
-  return Meeting.findOneAndUpdate({ meetingId }, { lockedAt: locked ? new Date() : null }, { new: true });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
+  meeting.lockedAt = locked ? new Date() : null;
+  await meeting.save();
+  return meeting;
 }
 
 async function raiseHand(meetingId, userId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   await getRedis().zadd(`raised-hands:${meeting._id}`, Date.now(), userId.toString());
   await MeetingParticipant.findOneAndUpdate({ meeting: meeting._id, user: userId }, { raisedHandAt: new Date() }, { new: true });
   await broadcastMeetingEvent(meeting, {
@@ -464,7 +524,10 @@ async function raiseHand(meetingId, userId) {
 }
 
 async function lowerHand(meetingId, userId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   await getRedis().zrem(`raised-hands:${meeting._id}`, userId.toString());
   await MeetingParticipant.findOneAndUpdate({ meeting: meeting._id, user: userId }, { raisedHandAt: null }, { new: true });
   await broadcastMeetingEvent(meeting, {
@@ -476,12 +539,20 @@ async function lowerHand(meetingId, userId) {
 }
 
 async function listRaisedHands(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return getRedis().zrange(`raised-hands:${meeting._id}`, 0, -1);
 }
 
 async function addReaction(meetingId, participantId, emoji) {
-  const meeting = await Meeting.findOneAndUpdate({ meetingId }, { $push: { reactions: { participantId, emoji, timestamp: new Date() } } }, { new: true });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
+  meeting.reactions.push({ participantId, emoji, timestamp: new Date() });
+  await meeting.save();
   const participant = participantId ? await MeetingParticipant.findById(participantId).populate("user", "displayName") : null;
   await broadcastMeetingEvent(meeting, {
     type: "reaction.created",
@@ -493,7 +564,7 @@ async function addReaction(meetingId, participantId, emoji) {
 }
 
 async function createBreakoutRooms(meetingId, rooms) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const created = [];
   for (const room of rooms) {
     const breakout = await BreakoutRoom.create({
@@ -508,12 +579,12 @@ async function createBreakoutRooms(meetingId, rooms) {
 }
 
 async function closeBreakoutRooms(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   await BreakoutRoom.updateMany({ meeting: meeting._id }, { status: "closed" });
 }
 
 async function createPoll(meetingId, userId, payload) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const poll = await Poll.create({ meeting: meeting._id, question: payload.question, options: payload.options, createdBy: userId });
   await broadcastMeetingEvent(meeting, {
     type: "poll.started",
@@ -569,7 +640,7 @@ async function endPoll(pollId) {
 }
 
 async function submitQuestion(meetingId, payload) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   const question = await QnAQuestion.create({ meeting: meeting._id, question: payload.question, asker: payload.asker, guestName: payload.guestName });
   await broadcastMeetingEvent(meeting, {
     type: "qna.question.created",
@@ -603,12 +674,18 @@ async function dismissQuestion(questionId) {
 }
 
 async function listQuestions(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return QnAQuestion.find({ meeting: meeting._id }).sort({ createdAt: -1 });
 }
 
 async function sendChatMessage(meetingId, sender, payload) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   const recipientId = payload.recipient || payload.recipientId;
   const moderationResult = await moderation(payload.content);
   const user = sender?.userId ? await User.findById(sender.userId) : null;
@@ -659,11 +736,14 @@ async function sendChatMessage(meetingId, sender, payload) {
 }
 
 async function listChatMessages(meetingId, userId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return ChatMessage.find({
     meeting: meeting._id,
     deletedAt: null,
-    $or: [{ messageType: "public" }, { sender: userId }, { recipient: userId }]
+    $or: userId ? [{ messageType: "public" }, { sender: userId }, { recipient: userId }] : [{ messageType: "public" }]
   }).sort({ createdAt: 1 });
 }
 
@@ -689,12 +769,18 @@ async function pinChatMessage(messageId, pinned) {
 }
 
 async function getWhiteboard(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return Whiteboard.findOneAndUpdate({ meeting: meeting._id }, {}, { upsert: true, new: true });
 }
 
 async function updateWhiteboard(meetingId, userId, canvasState) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   const whiteboard = await Whiteboard.findOneAndUpdate(
     { meeting: meeting._id },
     { canvasState, lastUpdatedBy: userId, updatedAt: new Date() },
@@ -713,7 +799,7 @@ async function uploadChatFile(meetingId, sender, file, payload = {}) {
     throw new NotFoundError("Chat file is required");
   }
 
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
   if (!meeting) {
     throw new NotFoundError("Meeting not found");
   }
@@ -774,12 +860,18 @@ async function deleteTemplate(templateId, userId) {
 }
 
 async function getNotes(meetingId) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return MeetingNote.find({ meeting: meeting._id }).sort({ updatedAt: -1 });
 }
 
 async function addNote(meetingId, userId, content) {
-  const meeting = await Meeting.findOne({ meetingId });
+  const meeting = await findMeetingByIdentifier(meetingId);
+  if (!meeting) {
+    throw new NotFoundError("Meeting not found");
+  }
   return MeetingNote.create({ meeting: meeting._id, content, createdBy: userId, updatedBy: userId });
 }
 
@@ -797,6 +889,7 @@ module.exports = {
   getMeetingByMeetingId,
   updateMeeting,
   cancelMeeting,
+  deleteMeeting,
   endMeeting,
   generateParticipantToken,
   listWaitingParticipants,

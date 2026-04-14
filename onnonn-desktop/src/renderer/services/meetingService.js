@@ -6,6 +6,7 @@ export const meetingService = {
   get: (meetingId) => api.get(`/meetings/${meetingId}`).then((response) => response.data.meeting),
   update: (meetingId, payload) => api.patch(`/meetings/${meetingId}`, payload).then((response) => response.data.meeting),
   cancel: (meetingId) => api.post(`/meetings/${meetingId}/cancel`).then((response) => response.data.meeting),
+  remove: (meetingId) => api.delete(`/meetings/${meetingId}`).then((response) => response.data),
   end: (meetingId) => api.post(`/meetings/${meetingId}/end`).then((response) => response.data.meeting),
   token: (meetingId, payload = {}) => api.post(`/meetings/${meetingId}/token`, payload).then((response) => response.data),
   waitingList: (meetingId) => api.get(`/meetings/${meetingId}/waiting-room`).then((response) => response.data.participants),

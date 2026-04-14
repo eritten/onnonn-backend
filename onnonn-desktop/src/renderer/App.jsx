@@ -107,7 +107,6 @@ function RouteEvents() {
   const status = useAuthStore((state) => state.status);
   const setExternalSession = useAuthStore((state) => state.setExternalSession);
   const applySessionRefresh = useAuthStore((state) => state.applySessionRefresh);
-  const setPendingMeetingJoin = useUiStore((state) => state.setPendingMeetingJoin);
   const consumePendingMeetingJoin = useUiStore((state) => state.consumePendingMeetingJoin);
   const announce = useUiStore((state) => state.announce);
 
@@ -138,14 +137,8 @@ function RouteEvents() {
           if (!payload.meetingId) {
             throw new Error("Meeting ID was missing from the desktop link.");
           }
-          if (status === "authenticated") {
-            await window.electronAPI.openMeetingWindow(payload);
-            announce(`Opening meeting ${payload.title}.`);
-            return;
-          }
-          setPendingMeetingJoin(payload);
-          navigate("/login", { replace: true });
-          announce("Sign in to continue to your meeting.");
+          await window.electronAPI.openMeetingWindow(payload);
+          announce(`Opening meeting ${payload.title}.`);
           return;
         }
         const code = parsed.pathname.includes("/google/callback") ? parsed.searchParams.get("code") : null;
@@ -194,7 +187,7 @@ function RouteEvents() {
       offStartInstantMeeting?.();
       offSessionRefreshed?.();
     };
-  }, [announce, applySessionRefresh, navigate, setExternalSession, setPendingMeetingJoin, status]);
+  }, [announce, applySessionRefresh, navigate, setExternalSession, status]);
 
   useEffect(() => {
     if (status === "authenticated" && ["/", "/login", "/register"].includes(location.pathname)) {

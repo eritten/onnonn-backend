@@ -3,18 +3,23 @@ import { LiveKitRoom, RoomAudioRenderer, VideoConference, useRoomContext } from 
 import { LocalVideoTrack, ParticipantEvent, RoomEvent, Track } from "livekit-client";
 import { formatDistanceStrict } from "date-fns";
 import {
+  BadgeCheck,
   BrushCleaning,
   Camera,
   CameraOff,
   CircleDot,
   ClipboardPenLine,
+  Clock3,
   Eraser,
   FileUp,
   Hand,
+  Hourglass,
   MessageSquare,
   Mic,
   MicOff,
   MonitorUp,
+  RefreshCcw,
+  Shield,
   PhoneOff,
   Save,
   Send,
@@ -493,12 +498,25 @@ function WhiteboardPanel({ meeting }) {
 
 function WaitingRoomPanel({ meeting, isHost }) {
   const [participants, setParticipants] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     if (!isHost) {
       return undefined;
     }
-    const refresh = () => meetingService.waitingList(meeting.meetingId).then(setParticipants).catch(() => {});
+    const refresh = async () => {
+      setRefreshing(true);
+      try {
+        const nextParticipants = await meetingService.waitingList(meeting.meetingId);
+        setParticipants(nextParticipants);
+        setLastUpdated(new Date());
+      } catch (error) {
+        console.error("[Onnonn Desktop] Waiting room refresh failed", error);
+      } finally {
+        setRefreshing(false);
+      }
+    };
     refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => window.clearInterval(timer);
@@ -510,31 +528,147 @@ function WaitingRoomPanel({ meeting, isHost }) {
 
   return (
     <div className="flex h-full flex-col">
+      <div className="border-b border-brand-800 px-4 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Waiting room</h3>
+            <p className="text-xs text-brand-muted">Review, admit, or reject guests before they enter the live meeting.</p>
+          </div>
+          <div className="rounded-2xl bg-brand-accent/15 p-3 text-brand-accent">
+            <ShieldCheck size={18} />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-brand-800 bg-brand-950/50 p-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-brand-muted">Waiting</p>
+            <p className="mt-2 text-2xl font-semibold text-brand-text">{participants.length}</p>
+          </div>
+          <div className="rounded-2xl border border-brand-800 bg-brand-950/50 p-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-brand-muted">Refresh</p>
+            <p className="mt-2 inline-flex items-center gap-2 text-sm text-brand-text">
+              <RefreshCcw size={14} className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Updating…" : "Every 5 seconds"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-brand-800 bg-brand-950/50 p-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-brand-muted">Last check</p>
+            <p className="mt-2 inline-flex items-center gap-2 text-sm text-brand-text">
+              <Clock3 size={14} />
+              {lastUpdated ? lastUpdated.toLocaleTimeString() : "Just now"}
+            </p>
+          </div>
+        </div>
+      </div>
       <div className="flex items-center justify-between border-b border-brand-800 px-4 py-3">
         <div>
-          <h3 className="font-semibold">Waiting room</h3>
-          <p className="text-xs text-brand-muted">Review and admit guests before they enter.</p>
+          <p className="text-sm font-medium">Guests awaiting admission</p>
+          <p className="text-xs text-brand-muted">Only hosts can manage the waiting room.</p>
         </div>
-        <ShieldCheck size={18} className="text-brand-accent" />
+        <button
+          type="button"
+          className="btn-secondary px-3 py-2"
+          aria-label="Refresh waiting room list"
+          onClick={async () => {
+            try {
+              setRefreshing(true);
+              const nextParticipants = await meetingService.waitingList(meeting.meetingId);
+              setParticipants(nextParticipants);
+              setLastUpdated(new Date());
+              toast.success("Waiting room updated.");
+            } catch (error) {
+              console.error("[Onnonn Desktop] Manual waiting room refresh failed", error);
+              toast.error("Could not refresh waiting room.");
+            } finally {
+              setRefreshing(false);
+            }
+          }}
+        >
+          <RefreshCcw size={16} className={`mr-2 ${refreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
       </div>
-      <div className="flex-1 space-y-3 overflow-auto p-4">
-        {participants.length ? participants.map((participant) => (
-          <div key={participant.identity} className="rounded-2xl border border-brand-800 bg-brand-950/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="font-medium">{participant.name || participant.identity}</p>
-                <p className="text-xs text-brand-muted">{participant.identity}</p>
-              </div>
-              <div className="flex gap-2">
-                <button className="btn-primary px-3 py-2" onClick={() => meetingService.admitWaiting(meeting.meetingId, participant.identity).then(() => setParticipants((current) => current.filter((item) => item.identity !== participant.identity)))}>Admit</button>
-                <button className="btn-secondary px-3 py-2" onClick={() => meetingService.rejectWaiting(meeting.meetingId, participant.identity).then(() => setParticipants((current) => current.filter((item) => item.identity !== participant.identity)))}>Reject</button>
-              </div>
-            </div>
-          </div>
-        )) : <EmptyState title="Waiting room is clear" description="Anyone waiting for admission will show up here." />}
+      <div className="flex-1 overflow-auto p-4">
+        {participants.length ? (
+          <ul className="space-y-3" role="list" aria-label="Participants in the waiting room">
+            {participants.map((participant) => (
+              <li key={participant.identity} className="rounded-[24px] border border-brand-800 bg-gradient-to-br from-brand-950/90 to-brand-900/70 p-4 shadow-panel">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex gap-3">
+                    <div className="rounded-2xl bg-brand-accent/15 p-3 text-brand-accent">
+                      <Hourglass size={18} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-brand-text">{participant.name || participant.identity}</p>
+                      <p className="mt-1 text-xs text-brand-muted">{participant.identity}</p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-900 px-3 py-1 text-brand-muted">
+                          <Shield size={12} />
+                          Waiting securely
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-accent/15 px-3 py-1 text-brand-accent">
+                          <BadgeCheck size={12} />
+                          Host approval required
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      className="btn-primary px-4 py-2"
+                      aria-label={`Admit ${participant.name || participant.identity} to the meeting`}
+                      onClick={async () => {
+                        try {
+                          await meetingService.admitWaiting(meeting.meetingId, participant.identity);
+                          setParticipants((current) => current.filter((item) => item.identity !== participant.identity));
+                          toast.success(`${participant.name || "Guest"} admitted.`);
+                        } catch (error) {
+                          console.error("[Onnonn Desktop] Admit waiting participant failed", error);
+                          toast.error("Could not admit participant.");
+                        }
+                      }}
+                    >
+                      Admit
+                    </button>
+                    <button
+                      className="btn-secondary px-4 py-2"
+                      aria-label={`Reject ${participant.name || participant.identity} from the meeting`}
+                      onClick={async () => {
+                        try {
+                          await meetingService.rejectWaiting(meeting.meetingId, participant.identity);
+                          setParticipants((current) => current.filter((item) => item.identity !== participant.identity));
+                          toast.success(`${participant.name || "Guest"} rejected.`);
+                        } catch (error) {
+                          console.error("[Onnonn Desktop] Reject waiting participant failed", error);
+                          toast.error("Could not reject participant.");
+                        }
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : <EmptyState title="Waiting room is clear" description="Anyone waiting for admission will show up here." />}
       </div>
       <div className="border-t border-brand-800 p-4">
-        <button className="btn-primary w-full" onClick={() => meetingService.admitAllWaiting(meeting.meetingId).then(() => setParticipants([]))}>Admit all</button>
+        <button
+          className="btn-primary w-full"
+          aria-label="Admit every participant in the waiting room"
+          onClick={async () => {
+            try {
+              await meetingService.admitAllWaiting(meeting.meetingId);
+              setParticipants([]);
+              toast.success("All waiting participants admitted.");
+            } catch (error) {
+              console.error("[Onnonn Desktop] Admit all waiting participants failed", error);
+              toast.error("Could not admit everyone.");
+            }
+          }}
+        >
+          Admit all
+        </button>
       </div>
     </div>
   );
@@ -913,7 +1047,8 @@ export function MeetingRoomPage() {
     setLoading(true);
     try {
       const result = await meetingService.token(meeting.meetingId, {
-        name: joinForm.displayName || user?.displayName,
+        guestName: joinForm.displayName || user?.displayName,
+        displayName: joinForm.displayName || user?.displayName,
         email: joinForm.email || user?.email,
         password: joinForm.password || undefined
       });
@@ -967,9 +1102,18 @@ export function MeetingRoomPage() {
 
       <Modal open={joinModalOpen} onClose={() => window.electronAPI.closeMeetingWindow()} title={`Join ${meeting?.title || title || "meeting"}`}>
         <div className="space-y-4">
-          <input className="field" placeholder="Display name" value={joinForm.displayName} onChange={(event) => setJoinForm((current) => ({ ...current, displayName: event.target.value }))} />
-          <input className="field" placeholder="Email" value={joinForm.email} onChange={(event) => setJoinForm((current) => ({ ...current, email: event.target.value }))} />
-          <input className="field" type="password" placeholder="Meeting password (if required)" value={joinForm.password} onChange={(event) => setJoinForm((current) => ({ ...current, password: event.target.value }))} />
+          <div className="space-y-2">
+            <label htmlFor="join-display-name" className="field-label">Display name</label>
+            <input id="join-display-name" className="field" placeholder="Display name" value={joinForm.displayName} onChange={(event) => setJoinForm((current) => ({ ...current, displayName: event.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="join-email" className="field-label">Email</label>
+            <input id="join-email" className="field" placeholder="Email" value={joinForm.email} onChange={(event) => setJoinForm((current) => ({ ...current, email: event.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="join-password" className="field-label">Meeting password</label>
+            <input id="join-password" className="field" type="password" placeholder="Meeting password (if required)" value={joinForm.password} onChange={(event) => setJoinForm((current) => ({ ...current, password: event.target.value }))} />
+          </div>
           {error ? <p className="text-sm text-brand-error">{error}</p> : null}
           <LoadingButton loading={loading} className="btn-primary w-full" onClick={joinMeeting}>Join meeting</LoadingButton>
         </div>

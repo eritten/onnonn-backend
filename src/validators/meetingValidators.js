@@ -5,6 +5,7 @@ const createMeetingSchema = z.object({
     title: z.string().min(2),
     description: z.string().optional(),
     scheduledStartTime: z.string().datetime().optional(),
+    instantMeeting: z.boolean().optional(),
     expectedDuration: z.number().int().positive().optional(),
     maxParticipants: z.number().int().positive().optional(),
     password: z.string().min(4).optional(),
