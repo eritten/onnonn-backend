@@ -1,5 +1,6 @@
 const fs = require("node:fs/promises");
 const { finalizeRecording } = require("../../services/recordingService");
+const { Recording } = require("../../models");
 
 module.exports = async function recordingProcessingProcessor(job) {
   let fileBuffer = job.data.fileBuffer;
@@ -15,6 +16,13 @@ module.exports = async function recordingProcessingProcessor(job) {
     } catch (_error) {
       // Source path may be on a different host; ignore and let finalize handle missing data.
     }
+  }
+  if (!fileBuffer && job.attemptsMade >= (job.opts.attempts || 1) - 1) {
+    await Recording.findByIdAndUpdate(job.data.recordingId, {
+      status: "failed",
+      errorMessage: "Recording output could not be downloaded from the media server after several attempts.",
+      endTime: new Date()
+    });
   }
   return finalizeRecording({ ...job.data, fileBuffer });
 };

@@ -28,6 +28,17 @@ function buildRecordingSourceUrl(location) {
   return `${publicBase}/${normalizedPath}`;
 }
 
+function buildEgressFailureMessage(egressInfo) {
+  const rawError = String(egressInfo?.error || "").trim();
+  if (rawError) {
+    if (rawError.toLowerCase().includes("start signal not received")) {
+      return "Recording did not start in time. Stay in the meeting for a few seconds after starting the recording, then try again.";
+    }
+    return `Recording failed: ${rawError}`;
+  }
+  return "Recording failed before a playable file was produced.";
+}
+
 module.exports = {
   stripe: asyncHandler(async (req, res) => {
     const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : JSON.stringify(req.body);
@@ -72,7 +83,7 @@ module.exports = {
     if (event.event === "egress_started") {
       await Recording.findOneAndUpdate(
         { liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id },
-        { status: "recording" }
+        { status: "recording", egressStartedAt: new Date(), errorMessage: undefined }
       );
     }
     if (event.event === "egress_updated") {
@@ -84,15 +95,31 @@ module.exports = {
     if (event.event === "egress_failed" || event.event === "egress_aborted") {
       await Recording.findOneAndUpdate(
         { liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id },
-        { status: "failed" }
+        {
+          status: "failed",
+          endTime: new Date(),
+          errorMessage: buildEgressFailureMessage(event.egressInfo)
+        }
       );
     }
     if (event.event === "egress_ended") {
       const recording = await Recording.findOne({ liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id });
       if (recording) {
-        const recordingQueue = getQueue("recording-processing");
+        const egressStatus = String(event.egressInfo?.status || "");
+        const isSuccessful = /COMPLETE|ACTIVE|ENDING/i.test(egressStatus) || !event.egressInfo?.error;
         const fileResult = event.egressInfo?.fileResults?.[0] || event.egressInfo?.file_results?.[0] || null;
         const location = fileResult?.location || fileResult?.filepath || event.egressInfo?.file?.filepath || null;
+        const outputSize = Number(fileResult?.size || event.egressInfo?.file?.size || 0);
+        if (!isSuccessful || !location || outputSize <= 0) {
+          await Recording.findByIdAndUpdate(recording._id, {
+            status: "failed",
+            endTime: new Date(),
+            errorMessage: buildEgressFailureMessage(event.egressInfo)
+          });
+          res.json({ received: true });
+          return;
+        }
+        const recordingQueue = getQueue("recording-processing");
         const sourceUrl = buildRecordingSourceUrl(location);
         if (recordingQueue) {
           logger.info("Queueing recording processing job", {

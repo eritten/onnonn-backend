@@ -634,12 +634,15 @@ export function RecordingsPage() {
       {data.length ? data.map((recording) => (
         <div key={recording._id} className="panel flex flex-wrap items-center justify-between gap-4 p-5">
           <div>
-            <p className="font-semibold">{recording.status === "ready" ? "Recording ready" : "Recording processing"}</p>
+            <p className="font-semibold">
+              {recording.status === "ready" ? "Recording ready" : recording.status === "failed" ? "Recording failed" : "Recording processing"}
+            </p>
             <p className="text-sm text-brand-muted">{recording.duration || 0}s · {(recording.fileSizeBytes || 0).toLocaleString()} bytes</p>
+            {recording.errorMessage ? <p className="mt-1 text-sm text-rose-300">{recording.errorMessage}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary" onClick={() => setPreview(recording)}>Play</button>
-            <button className="btn-secondary" onClick={() => {
+            <button className="btn-secondary" disabled={!recording.fileUrl} onClick={() => setPreview(recording)}>Play</button>
+            <button className="btn-secondary" disabled={!recording.fileUrl} onClick={() => {
               const anchor = document.createElement("a");
               anchor.href = recording.fileUrl;
               anchor.download = `${recording.meeting?.title || "onnonn-recording"}.mp4`;
@@ -655,7 +658,7 @@ export function RecordingsPage() {
       )) : <EmptyState title="No recordings yet" description="When cloud recordings are ready, they will appear here with playback and share options." />}
 
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="Recording preview">
-        {preview?.fileUrl ? <video controls className="w-full rounded-2xl" src={preview.fileUrl} /> : <EmptyState title="Recording unavailable" description="This recording does not have a playable file yet." />}
+        {preview?.fileUrl ? <video controls className="w-full rounded-2xl" src={preview.fileUrl} /> : <EmptyState title="Recording unavailable" description={preview?.errorMessage || "This recording does not have a playable file yet."} />}
       </Modal>
     </div>
   );

@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const { Recording, Meeting, Subscription } = require("../models");
-const { startRecording, stopRecording } = require("./livekitService");
+const { startRecording, stopRecording, listEgress } = require("./livekitService");
 const { randomToken } = require("../utils/crypto");
 const { uploadBufferToProvider } = require("./storageService");
 const { NotFoundError, PlanLimitError, AuthorizationError, LiveKitError } = require("../utils/errors");
@@ -16,6 +16,43 @@ function buildRecordingOutputTargets(meetingId) {
     sourcePath,
     sourceUrl: publicBase ? `${publicBase}/recordings/${filename}` : null
   };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForEgressToBecomeActive(recordingId, liveKitEgressId) {
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    const refreshed = await Recording.findById(recordingId).select("egressStartedAt status");
+    if (!refreshed || refreshed.status === "failed") {
+      return refreshed;
+    }
+    if (refreshed.egressStartedAt) {
+      return refreshed;
+    }
+    try {
+      const egressItems = await listEgress({ roomName: undefined });
+      const activeMatch = egressItems.find((item) => {
+        const itemId = item.egressId || item.egress_id;
+        const status = String(item.status || "");
+        return itemId === liveKitEgressId && /ACTIVE|ENDING|COMPLETE/i.test(status);
+      });
+      if (activeMatch) {
+        await Recording.findByIdAndUpdate(recordingId, {
+          egressStartedAt: new Date(),
+          status: "recording",
+          errorMessage: undefined
+        });
+        return Recording.findById(recordingId).select("egressStartedAt status");
+      }
+    } catch (_error) {
+      // If the server can't list egress yet, keep waiting briefly.
+    }
+    await delay(2000);
+  }
+  return Recording.findById(recordingId).select("egressStartedAt status");
 }
 
 async function startMeetingRecording(meetingId, userId) {
@@ -56,7 +93,7 @@ async function startMeetingRecording(meetingId, userId) {
     liveKitEgressId: egress.egressId || egress.egress_id,
     egressOutputPath: output.sourcePath,
     egressOutputUrl: output.sourceUrl,
-    status: "recording",
+    status: "pending",
     startTime: new Date(),
     storageProvider: "cloudinary"
   });
@@ -70,9 +107,20 @@ async function stopMeetingRecording(recordingId, userId) {
   if (recording.host.toString() !== userId.toString()) {
     throw new AuthorizationError("Only the host can stop the recording");
   }
+  if (!recording.egressStartedAt) {
+    const refreshed = await waitForEgressToBecomeActive(recording._id, recording.liveKitEgressId);
+    if (!refreshed?.egressStartedAt) {
+      recording.status = "failed";
+      recording.endTime = new Date();
+      recording.errorMessage = "Recording could not fully start before it was stopped. Please wait a few seconds after starting the recording and try again.";
+      await recording.save();
+      throw new LiveKitError(recording.errorMessage);
+    }
+  }
   await stopRecording(recording.liveKitEgressId);
   recording.status = "processing";
   recording.endTime = new Date();
+  recording.errorMessage = undefined;
   await recording.save();
   const { getQueue } = require("../jobs");
   const recordingQueue = getQueue("recording-processing");
@@ -114,6 +162,7 @@ async function finalizeRecording({ recordingId, fileBuffer }) {
   recording.fileUrl = uploaded.url;
   recording.fileSizeBytes = uploaded.bytes;
   recording.status = "ready";
+  recording.errorMessage = undefined;
   recording.duration = recording.startTime && recording.endTime ? Math.round((recording.endTime - recording.startTime) / 1000) : 0;
   await recording.save();
   await Subscription.findOneAndUpdate({ user: recording.host }, { $inc: { storageUsedBytes: uploaded.bytes } });

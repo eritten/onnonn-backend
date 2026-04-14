@@ -66,6 +66,7 @@ async function startRecording(roomName, outputFilepath) {
     ? `/${normalizedOutputPath}`
     : `/home/egress/recordings/${normalizedOutputPath.replace(/^recordings\/?/, "")}`;
   return egressClient.startRoomCompositeEgress(roomName, {
+    layout: "speaker",
     file: { filepath: egressFilepath }
   });
 }
@@ -75,6 +76,18 @@ async function stopRecording(egressId) {
     return null;
   }
   return egressClient.stopEgress(egressId);
+}
+
+async function listEgress(options = {}) {
+  if (!egressClient) {
+    return [];
+  }
+  const response = await egressClient.listEgress(options);
+  return Array.isArray(response)
+    ? response
+    : Array.isArray(response?.items)
+      ? response.items
+      : [];
 }
 
 async function verifyWebhook(body, authorization) {
@@ -94,5 +107,6 @@ module.exports = {
   sendData,
   startRecording,
   stopRecording,
+  listEgress,
   verifyWebhook
 };
