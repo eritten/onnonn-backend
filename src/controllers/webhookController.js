@@ -3,8 +3,29 @@ const { verifyStripeWebhook } = require("../services/stripeService");
 const { processStripeEvent } = require("../services/billingService");
 const { verifyWebhook } = require("../services/livekitService");
 const { Recording, Meeting, MeetingParticipant } = require("../models");
-const { finalizeRecording } = require("../services/recordingService");
 const { getQueue } = require("../jobs");
+const env = require("../config/env");
+
+function buildRecordingSourceUrl(location) {
+  if (!location) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(location)) {
+    return location;
+  }
+
+  const publicBase = String(env.livekitUrl || "").replace(/^wss?:\/\//i, "https://").replace(/\/+$/, "");
+  let normalizedPath = String(location).replace(/\\/g, "/");
+  normalizedPath = normalizedPath
+    .replace(/^\/home\/egress\/recordings\/?/, "recordings/")
+    .replace(/^\/opt\/livekit\/recordings\/?/, "recordings/")
+    .replace(/^\/+/, "");
+  if (!publicBase) {
+    return null;
+  }
+  return `${publicBase}/${normalizedPath}`;
+}
 
 module.exports = {
   stripe: asyncHandler(async (req, res) => {
@@ -57,10 +78,18 @@ module.exports = {
     if (event.event === "egress_ended") {
       const recording = await Recording.findOne({ liveKitEgressId: event.egressInfo?.egressId || event.egressInfo?.egress_id });
       if (recording) {
-        await finalizeRecording({
-          recordingId: recording._id,
-          fileBuffer: event.egressInfo?.fileResults?.[0]?.location ? Buffer.from(event.egressInfo.fileResults[0].location) : Buffer.from("finished")
-        });
+        const recordingQueue = getQueue("recording-processing");
+        const fileResult = event.egressInfo?.fileResults?.[0] || event.egressInfo?.file_results?.[0] || null;
+        const location = fileResult?.location || fileResult?.filepath || event.egressInfo?.file?.filepath || null;
+        const sourceUrl = buildRecordingSourceUrl(location);
+        if (recordingQueue) {
+          await recordingQueue.add({
+            recordingId: recording._id.toString(),
+            sourceUrl,
+            sourcePath: location,
+            egressInfo: event.egressInfo || {}
+          });
+        }
         const transcriptionQueue = getQueue("ai-transcription");
         const summaryQueue = getQueue("ai-summary");
         const analysisQueue = getQueue("ai-analysis");

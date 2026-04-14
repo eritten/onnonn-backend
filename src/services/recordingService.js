@@ -67,7 +67,10 @@ async function finalizeRecording({ recordingId, fileBuffer }) {
   if (!recording) {
     throw new NotFoundError("Recording not found");
   }
-  const sourceBuffer = fileBuffer || Buffer.from("demo");
+  if (!fileBuffer) {
+    throw new LiveKitError("Recording output is not reachable yet. Please verify the LiveKit recording file location or try again once the egress file is available.");
+  }
+  const sourceBuffer = fileBuffer;
   const uploaded = await uploadBufferToProvider({
     buffer: sourceBuffer,
     folder: "onnonn/recordings",
