@@ -770,16 +770,36 @@ function MeetingRoomContent({ meeting, token, panel, setPanel, currentUser, onMe
   }, [currentUser?.displayName, meeting.meetingId, room, toggleHand]);
 
   const toggleRecording = useCallback(async () => {
-    if (recording?._id) {
-      await recordingService.stop(recording._id);
-      setRecording(null);
-      toast.success("Recording stopped.");
+    if (!room?.localParticipant || room?.state !== "connected") {
+      toast.error("Join the meeting fully before starting a recording.");
+      announce("Join the meeting fully before starting a recording.");
       return;
     }
-    const nextRecording = await recordingService.start(meeting.meetingId);
-    setRecording(nextRecording);
-    toast.success("Recording started.");
-  }, [meeting.meetingId, recording?._id]);
+    if (recording?._id) {
+      try {
+        await recordingService.stop(recording._id);
+        setRecording(null);
+        toast.success("Recording stopped.");
+      } catch (error) {
+        console.error("Failed to stop recording", error);
+        toast.error(error?.response?.data?.message || error?.message || "Unable to stop recording right now.");
+      }
+      return;
+    }
+    if (Date.now() - startedAt < 8000) {
+      toast.error("Please wait a few seconds after joining before starting the recording.");
+      announce("Please wait a few seconds after joining before starting the recording.");
+      return;
+    }
+    try {
+      const nextRecording = await recordingService.start(meeting.meetingId);
+      setRecording(nextRecording);
+      toast.success("Recording started.");
+    } catch (error) {
+      console.error("Failed to start recording", error);
+      toast.error(error?.response?.data?.message || error?.message || "Unable to start recording right now.");
+    }
+  }, [announce, meeting.meetingId, recording?._id, room, startedAt]);
 
   const leaveRoom = useCallback(async () => {
     await room.disconnect();
